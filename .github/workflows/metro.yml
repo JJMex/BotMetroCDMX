@@ -22,7 +22,11 @@ jobs:
           python-version: '3.9'
 
       - name: Instalar librerías
-        run: pip install -r requirements.txt
+        # CAMBIO AQUÍ: Instalamos directamente las herramientas necesarias
+        # (requests, ntscraper, feedparser y pytz) para evitar errores.
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests ntscraper feedparser pytz
 
       - name: Revisar @MetroCDMX
         env:
