@@ -131,7 +131,7 @@ def revisar_metro():
 if __name__ == "__main__":
     # 1. Aviso de Sistema
     mensaje_inicio = (
-        "⚙️ <b>SISTEMA METRO EN LÍNEA</b>\n\n"
+        "🚇 <b>SISTEMA METRO EN LÍNEA</b>\n\n"
         "Analizando profundamente (@MetroCDMX)...\n"
         "<i>Escaneando últimos 30 registros.</i>"
     )
