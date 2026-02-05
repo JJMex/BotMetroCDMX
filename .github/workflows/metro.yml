@@ -3,9 +3,11 @@ name: Monitor Metro CDMX
 on:
   push:                # Se activa al guardar (Primera prueba)
   workflow_dispatch:   # Botón manual para que tú revises cuando quieras
-  schedule:
-    # Cron: Minuto 0 y 30, Horas 11 a 23 UTC (5 AM a 5 PM MX aprox + tarde)
-- cron: '*/30 11-23,0-5 * * *'
+schedule:
+    # Parte 1: De 5:00 AM a 5:00 PM (Hora MX aprox)
+    - cron: '*/30 11-23 * * *'
+    # Parte 2: De 6:00 PM a 11:00 PM (Hora MX aprox)
+    - cron: '*/30 0-5 * * *'
 
 jobs:
   vigilancia-metro:
