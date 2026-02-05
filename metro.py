@@ -160,7 +160,7 @@ def revisar_metro():
     if not reportes_encontrados:
         print("✅ Sin novedades.")
         fuente = "Twitter y Noticias" if twitter_exito else "Noticias (Twitter Off)"
-        enviar_telegram(f"✅ <b>Estado del Metro:</b> Sin reportes graves detectados en la última hora.\n<i>Fuente: {fuente}</i> 🚇")
+        enviar_telegram(f"✅ <b>Estado del Metro:</b> Sin reportes graves detectados en la última hora.\n<i>Fuente: {fuente}</i>")
 
 if __name__ == "__main__":
     mensaje_inicio = (
