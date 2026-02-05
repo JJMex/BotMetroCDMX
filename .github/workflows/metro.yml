@@ -1,0 +1,29 @@
+name: Monitor Metro CDMX
+
+on:
+  push:                # Se activa al guardar (Primera prueba)
+  workflow_dispatch:   # Botón manual para que tú revises cuando quieras
+  schedule:
+    # Cron: Minuto 0 y 30, Horas 11 a 23 UTC (5 AM a 5 PM MX aprox + tarde)
+    - cron: '*/30 11-5 * * *' 
+
+jobs:
+  vigilancia-metro:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v3
+
+      - name: Instalar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Instalar librerías
+        run: pip install -r requirements.txt
+
+      - name: Revisar @MetroCDMX
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python metro.py
