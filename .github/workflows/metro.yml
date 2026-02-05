@@ -5,7 +5,7 @@ on:
   workflow_dispatch:   # Botón manual para que tú revises cuando quieras
   schedule:
     # Cron: Minuto 0 y 30, Horas 11 a 23 UTC (5 AM a 5 PM MX aprox + tarde)
-    - cron: '*/30 11-5 * * *' 
+- cron: '*/30 11-23,0-5 * * *'
 
 jobs:
   vigilancia-metro:
