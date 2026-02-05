@@ -9,7 +9,9 @@ from ntscraper import Nitter
 # --- CONFIGURACIÓN ---
 TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
+TARGET_USER = "MetroCDMX"  # Usuario oficial asegurado
 
+# Palabras de alerta y hashtags oficiales
 PALABRAS_CLAVE = [
     "retraso", "marcha lenta", "falla", "desalojo", "humo", "detenido", 
     "caos", "lento", "espera", "sin servicio", "#MetroAlMomento", "#AvisoMetro"
@@ -54,51 +56,48 @@ def verificar_horario_servicio():
     return None
 
 def revisar_metro():
-    print("🔍 Iniciando escaneo HÍBRIDO de @MetroCDMX...")
+    print(f"🔍 Iniciando escaneo de @{TARGET_USER}...")
     
-    # --- SISTEMA DE REINTENTOS AVANZADO ---
+    # --- SISTEMA DE REINTENTOS HÍBRIDO ---
     max_intentos = 5
     exito = False
-    error_final = ""
-    tweets_data = None
-
+    error_log = ""
     scraper = Nitter(log_level=1, skip_instance_check=False)
 
     for intento in range(1, max_intentos + 1):
         try:
             print(f"🔄 Intento {intento} de {max_intentos}...")
+            tweets_data = None
             
-            # ESTRATEGIA DUAL:
-            # Intentos 1 y 2: Buscamos el PERFIL (mode='user')
-            # Intentos 3, 4 y 5: Buscamos TWEETS (mode='term') -> "from:MetroCDMX"
-            # Esto ayuda porque son endpoints diferentes y a veces uno funciona y el otro no.
-            
+            # ESTRATEGIA A: Intentar ver el perfil directo (Intentos 1 y 2)
             if intento <= 2:
-                print("   👉 Modo: Perfil de Usuario")
-                tweets_data = scraper.get_tweets("MetroCDMX", mode='user', number=15)
-            else:
-                print("   👉 Modo: Búsqueda (from:MetroCDMX)")
-                tweets_data = scraper.get_tweets("from:MetroCDMX", mode='term', number=15)
+                print("   👉 Estrategia: Perfil Directo")
+                tweets_data = scraper.get_tweets(TARGET_USER, mode='user', number=15)
             
-            # Validación estricta para evitar el error "list index out of range"
+            # ESTRATEGIA B: Usar el buscador si el perfil falla (Intentos 3, 4, 5)
+            else:
+                print(f"   👉 Estrategia: Búsqueda (from:{TARGET_USER})")
+                tweets_data = scraper.get_tweets(f"from:{TARGET_USER}", mode='term', number=15)
+            
+            # --- VERIFICACIÓN ANTI-ERROR "INDEX OUT OF RANGE" ---
+            # Solo procesamos si REALMENTE llegaron tweets
             if tweets_data and 'tweets' in tweets_data and len(tweets_data['tweets']) > 0:
-                print("   ✅ ¡Datos recibidos correctamente!")
+                print("   ✅ ¡Datos recibidos!")
                 procesar_tweets(tweets_data['tweets'])
                 exito = True
-                break # Éxito, salimos del bucle
+                break # Éxito rotundo, salimos del ciclo
             else:
-                raise Exception("Lista vacía o instancia bloqueada.")
+                # Si llega vacío, lanzamos error controlado para forzar el siguiente intento
+                raise Exception("Lista de tweets vacía (Bloqueo de instancia)")
                 
         except Exception as e:
             print(f"⚠️ Fallo intento {intento}: {e}")
-            error_final = str(e)
-            # Espera ALEATORIA entre 10 y 20 segundos para engañar al bloqueo
-            wait_time = random.randint(10, 20)
-            time.sleep(wait_time)
+            error_log = str(e)
+            # Espera progresiva: 5s, 10s, 15s...
+            time.sleep(intento * 5)
     
     if not exito:
-        # Solo mandamos alerta si fallaron los 5 intentos y las 2 estrategias
-        enviar_telegram(f"⚠️ <b>Error de Monitoreo Persistente</b>\n\nTwitter bloqueó las conexiones (Perfil y Búsqueda).\n<i>Último error: {error_final[:40]}...</i>")
+        enviar_telegram(f"⚠️ <b>Alerta de Conexión</b>\n\nNo pude conectar con @{TARGET_USER} tras {max_intentos} intentos.\n<i>Twitter está bloqueando las consultas temporales.</i>")
 
 def procesar_tweets(lista_tweets):
     reportes_encontrados = False
@@ -108,19 +107,18 @@ def procesar_tweets(lista_tweets):
             texto = tweet['text'].lower()
             fecha_tweet = parsear_fecha_nitter(tweet['date'])
             
-            # Filtro de antigüedad (60 mins)
+            # Filtro de antigüedad (60 mins) para evitar spam de noticias viejas
             es_reciente = False
             if fecha_tweet:
                 if (datetime.now(pytz.utc) - fecha_tweet) < timedelta(minutes=60):
                     es_reciente = True
             else:
-                # Si falla la fecha pero el tweet está en la lista top, asumimos reciente
-                es_reciente = True
+                es_reciente = True # Si falla la fecha, asumimos reciente por seguridad
 
             if es_reciente:
+                # Verificamos palabras clave en el texto
                 if any(p.lower() in texto for p in PALABRAS_CLAVE) and not any(i in texto for i in IGNORAR):
                     
-                    # Formatear hora
                     hora_msg = ""
                     if fecha_tweet:
                         tz_mx = pytz.timezone('America/Mexico_City')
@@ -137,7 +135,7 @@ def procesar_tweets(lista_tweets):
 
     if not reportes_encontrados:
         print("✅ Sin novedades.")
-        enviar_telegram("✅ <b>Estado del Metro:</b> Sin reportes graves detectados en el último escaneo. Flujo normal. 🚇")
+        enviar_telegram("✅ <b>Estado del Metro:</b> Sin reportes graves en la última hora. Todo parece fluir. 🚇")
 
 if __name__ == "__main__":
     mensaje_inicio = (
@@ -147,7 +145,6 @@ if __name__ == "__main__":
     )
     enviar_telegram(mensaje_inicio)
     
-    # Pausa inicial
     time.sleep(3)
 
     aviso_hora = verificar_horario_servicio()
