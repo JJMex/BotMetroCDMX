@@ -1,9 +1,9 @@
 name: Monitor Metro CDMX
 
 on:
-  push:                # Se activa al guardar (Primera prueba)
-  workflow_dispatch:   # Botón manual para que tú revises cuando quieras
-schedule:
+  push:
+  workflow_dispatch:
+  schedule:
     # Parte 1: De 5:00 AM a 5:00 PM (Hora MX aprox)
     - cron: '*/30 11-23 * * *'
     # Parte 2: De 6:00 PM a 11:00 PM (Hora MX aprox)
