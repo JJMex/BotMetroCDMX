@@ -15,7 +15,8 @@ IGNORAR = ["buenos días", "horario de servicio", "domingos y días festivos", "
 def enviar_telegram(mensaje):
     if not TOKEN or not CHAT_ID: return
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    data = {'chat_id': CHAT_ID, 'text': mensaje, 'parse_mode': 'Markdown'}
+    # CAMBIO IMPORTANTE: Usamos 'HTML' para que las negritas <b> funcionen
+    data = {'chat_id': CHAT_ID, 'text': mensaje, 'parse_mode': 'HTML', 'disable_web_page_preview': True}
     requests.post(url, data=data)
 
 def revisar_metro():
@@ -32,31 +33,35 @@ def revisar_metro():
             for tweet in tweets['tweets']:
                 texto = tweet['text'].lower()
                 
-                # 1. Filtro de antigüedad (Solo tweets de hace menos de 40 min aprox)
-                # (Nota: Nitter a veces no da fecha exacta fácil, así que confiamos en que son los más recientes)
-                
-                # 2. Detectar Problemas
+                # Detectar Problemas
                 if any(p in texto for p in PALABRAS_CLAVE) and not any(i in texto for i in IGNORAR):
-                    mensaje = f"🚨 **ALERTA METRO** 🚨\n\n{tweet['text']}\n\n[Ver Tweet]({tweet['link']})"
+                    # Formato HTML para la alerta
+                    mensaje = f"🚨 <b>ALERTA METRO</b> 🚨\n\n{tweet['text']}\n\n<a href='{tweet['link']}'>Ver Tweet Original</a>"
                     enviar_telegram(mensaje)
                     reportes_encontrados = True
         
-        # --- NUEVA FUNCIONALIDAD: AVISO DE CALMA ---
+        # --- LÓGICA DE "TODO BIEN" ---
+        # Si después de revisar los 5 tweets no se activó ninguna alerta:
         if not reportes_encontrados:
             print("✅ Sin novedades.")
-            enviar_telegram("✅ **Estado del Metro:** Sin reportes graves detectados en los últimos minutos. Buen viaje. 🚇")
+            enviar_telegram("✅ <b>Estado del Metro:</b> Sin reportes graves detectados en los últimos minutos. Todo fluye con normalidad. 🚇")
             
     except Exception as e:
         print(f"Error: {e}")
+        # Opcional: Avisar si falló el scrapper
+        # enviar_telegram(f"⚠️ Error al consultar el Metro: {e}")
 
 if __name__ == "__main__":
-    # --- MENSAJE DE ARRANQUE (PRUEBA) ---
+    # 1. Mensaje de arranque (Con formato HTML corregido)
     mensaje_inicio = (
-        "✅ <b>SISTEMA EN LÍNEA</b>\n\n"
+        "⚙️ <b>SISTEMA EN LÍNEA</b>\n\n"
         "La conexión se ha establecido correctamente.\n"
-        "<i>El bot realizará el análisis del sistema en breve.</i>"
+        "<i>El bot está analizando el estado del servicio en tiempo real...</i>"
     )
     enviar_telegram(mensaje_inicio)
 
-    # --- EJECUCIÓN DEL ANÁLISIS ---
+    # Pequeña pausa dramática de 2 segundos para que no lleguen los mensajes pegados
+    time.sleep(2)
+
+    # 2. Ejecutar análisis (Mandará Alerta o Mensaje de "Todo Bien")
     revisar_metro()
