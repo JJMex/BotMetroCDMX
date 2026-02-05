@@ -88,4 +88,13 @@ def revisar_metro():
     except Exception as e: print(f"Error General: {e}")
 
 if __name__ == "__main__":
+    # --- MENSAJE DE ARRANQUE (PRUEBA) ---
+    mensaje_inicio = (
+        "✅ <b>SISTEMA EN LÍNEA</b>\n\n"
+        "La conexión se ha establecido correctamente.\n"
+        "<i>El bot realizará el análisis del sistema en breve.</i>"
+    )
+    enviar_telegram(mensaje_inicio)
+
+    # --- EJECUCIÓN DEL ANÁLISIS ---
     revisar_metro()
