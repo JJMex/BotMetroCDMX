@@ -27,22 +27,15 @@ def enviar_telegram(mensaje):
         except: time.sleep(5)
 
 def verificar_horario_servicio(ahora):
-    dia = ahora.weekday() # 0=Lunes, 5=Sábado, 6=Domingo
+    dia = ahora.weekday() 
     hora = ahora.hour
     
-    # --- MENSAJES DE BIENVENIDA ---
-    # Lunes a Viernes: 5:05 AM
     if dia <= 4 and hora == 5:
         return "🚇 <b>INICIO DE SERVICIO</b>\n──────────────────\nLa red del Metro inicia operaciones. ¡Buen viaje!"
-    # Sábado: 6:05 AM
     elif dia == 5 and hora == 6:
         return "🚇 <b>INICIO DE SERVICIO (SÁBADO)</b>\n──────────────────\nInicia la operación de fin de semana."
-    # Domingo/Festivo: 7:05 AM
     elif dia == 6 and hora == 7:
         return "🚇 <b>INICIO DE SERVICIO (DOMINGO)</b>\n──────────────────\nEl servicio dominical ha comenzado."
-    
-    # --- MENSAJE DE CIERRE ---
-    # 12:05 AM (Hora en la que corre el último proceso del workflow)
     elif hora == 0:
         return "💤 <b>CIERRE DE SERVICIO</b>\n──────────────────\nLa red ha concluido sus operaciones por hoy. ¡Buenas noches!"
     
@@ -67,13 +60,11 @@ def revisar_incidentes(ahora):
     # 2. TWITTER (Nitter)
     try:
         scraper = Nitter(log_level=1, skip_instance_check=False)
-        # Intentamos obtener los últimos avisos oficiales
         data = scraper.get_tweets("MetroCDMX", mode='user', number=10)
         if data and 'tweets' in data:
             for t in data['tweets']:
                 txt = t['text'].lower()
                 if any(p in txt for p in PALABRAS_CLAVE) and not any(i in txt for i in IGNORAR):
-                    # Solo tweets muy recientes
                     if "m" in t['date'] or "h" in t['date']:
                         incidentes.append(f"🚨 <b>AVISO OFICIAL:</b> {t['text']}\n🔗 <a href='{t['link']}'>Ver Tweet</a>")
     except: pass
@@ -84,23 +75,27 @@ def main():
     tz_mx = pytz.timezone('America/Mexico_City')
     ahora = datetime.now(tz_mx)
     
-    # 1. Revisar si es hora de Apertura o Cierre
+    # --- 1. MENSAJE DE CONEXIÓN (Siempre se envía al iniciar) ---
+    enviar_telegram("📡 <i>Conectando con la red de movilidad y analizando reportes ciudadanos...</i>")
+    time.sleep(2) # Pausa para simular el escaneo
+
+    # --- 2. REVISAR TURNO (Apertura/Cierre) ---
     mensaje_turno = verificar_horario_servicio(ahora)
     if mensaje_turno:
         enviar_telegram(mensaje_turno)
-        return # Si es apertura/cierre, enviamos el saludo y terminamos
+        return
 
-    # 2. Revisar Incidentes (Silencio Inteligente)
+    # --- 3. REVISAR INCIDENTES ---
     reportes = revisar_incidentes(ahora)
     
     if reportes:
         hora_str = ahora.strftime('%I:%M %p')
-        header = f"📡 <i>Sincronizando red de movilidad... Reporte {hora_str}:</i>\n\n"
-        # Eliminar duplicados manteniendo el orden
+        header = f"🚨 <b>INCIDENCIAS DETECTADAS ({hora_str})</b>\n──────────────────\n"
         reportes_unicos = list(dict.fromkeys(reportes))
         enviar_telegram(header + "\n\n".join(reportes_unicos))
     else:
-        print("✅ Sin incidentes detectados. Manteniendo silencio.")
+        # --- 4. MENSAJE DE NORMALIDAD (Si no hay fallas) ---
+        enviar_telegram("✅ <b>Estado del Metro:</b> Sin reportes de fallas o retrasos detectados en la última hora.\n<i>Sistema trabajando con normalidad.</i>")
 
 if __name__ == "__main__":
     main()
