@@ -1,13 +1,19 @@
 name: Monitor Metro CDMX
 
 on:
+  # 1. AUTO-TEST AL GUARDAR CAMBIOS
   push:
+    branches:
+      - main
+      
+  # 2. BOTÓN MANUAL (Para pruebas instantáneas)
   workflow_dispatch:
+
+  # 3. HORARIO DE SERVICIO (Una vez cada hora)
+  # Ejecución al minuto :05 de cada hora.
+  # El rango 11-23 y 0-6 en UTC cubre de las 5:05 AM a las 12:05 AM hora CDMX.
   schedule:
-    # Parte 1: De 5:00 AM a 5:00 PM (Hora MX aprox)
-    - cron: '*/30 11-23 * * *'
-    # Parte 2: De 6:00 PM a 11:00 PM (Hora MX aprox)
-    - cron: '*/30 0-5 * * *'
+    - cron: '5 0-6,11-23 * * *'
 
 jobs:
   vigilancia-metro:
@@ -22,14 +28,12 @@ jobs:
           python-version: '3.9'
 
       - name: Instalar librerías
-        # CAMBIO AQUÍ: Instalamos directamente las herramientas necesarias
-        # (requests, ntscraper, feedparser y pytz) para evitar errores.
         run: |
           python -m pip install --upgrade pip
           pip install requests ntscraper feedparser pytz
 
-      - name: Revisar @MetroCDMX
+      - name: Ejecutar Monitor
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python metro.py
+        run: python main.py
