@@ -213,6 +213,8 @@ def main():
         h = ahora.strftime('%I:%M %p')
         enviar_telegram(f"🚨 <b>INCIDENCIAS DETECTADAS ({h})</b>\n──────────────────\n" + "\n\n".join(un))
     else:
+         # --- 4. MENSAJE DE NORMALIDAD (Si no hay fallas) ---
+        enviar_telegram("✅ <b>Estado del Metro:</b> Sin reportes de fallas o retrasos detectados en la última hora.\n<i>Sistema trabajando con normalidad.</i>")
         print("✅ Todo normal.")
 
 if __name__ == "__main__":
