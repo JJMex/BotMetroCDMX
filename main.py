@@ -12,10 +12,11 @@ from ntscraper import Nitter
 from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
 from urllib.parse import unquote
-from PIL import Image, ImageDraw, ImageFont # Módulo de Dibujo
+from PIL import Image, ImageDraw, ImageFont
 
-# Desactivar advertencias de SSL
+# 1. OPTIMIZACIÓN DE RED
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+ua = UserAgent()
 
 # --- CONFIGURACIÓN ---
 TOKEN = os.environ.get('TELEGRAM_TOKEN')
@@ -25,31 +26,33 @@ DESTINATARIOS = [id_ for id_ in [ID_GRUPO, ID_CANAL] if id_]
 
 RSS_URL = "https://news.google.com/rss/search?q=Metro+CDMX+retraso+OR+falla+OR+caos+when:1h&hl=es-419&gl=MX&ceid=MX:es-419"
 
-# Diccionario de causas
+# --- DICCIONARIOS DE INTELIGENCIA ---
 CAUSAS = {
-    "retraso": "Retrasos", "lento": "Marcha Lenta", "lenta": "Marcha Lenta",
+    "retraso": "Retraso", "lento": "Marcha Lenta", "lenta": "Marcha Lenta",
     "falla": "Falla Técnica", "avería": "Avería", "desalojo": "Desalojo",
     "humo": "Humo", "fuego": "Conato Incendio", "quemado": "Olor Quemado",
     "zapatas": "Zapatas", "lluvia": "Lluvia", "mojado": "Lluvia", 
     "caos": "Aglomeración", "colapso": "Colapso", "espera": "Espera Alta", 
     "detenido": "Detenido", "suicida": "Persona en Vías", "arrollado": "Accidente",
-    "corte": "Corte Energía", "bloqueo": "Bloqueo", "cerrada": "Cerrada"
+    "corte": "Sin Energía", "bloqueo": "Bloqueo", "cerrada": "Cerrada",
+    "sin servicio": "Sin Servicio"
 }
 
-PALABRAS_CLAVE = list(CAUSAS.keys()) + ["afectaciones", "avance", "servicio"]
-PALABRAS_SOLUCION = ["restablece", "normal", "agiliza", "solucionado", "continuo", "reanuda"]
-IGNORAR = ["buenos días", "cubrebocas", "tarjeta", "arte", "exposición", "domingos y días festivos", "cultura"]
+PALABRAS_CLAVE = list(CAUSAS.keys()) + ["afectaciones", "avance", "servicio", "estaciones"]
+PALABRAS_SOLUCION = ["restablece", "normal", "agiliza", "solucionado", "continuo", "reanuda", "opera con normalidad"]
+IGNORAR = ["buenos días", "cubrebocas", "tarjeta", "arte", "exposición", "domingos y días festivos", "cultura", "museo", "simulacro"]
 FIRMA = "\n\n— 🤖 <i>JJMex Bot</i>"
 
-# COLORES OFICIALES DEL METRO (Hex)
-COLORES_LINEAS = {
+# Diseño: Colores Material Design / Metro Oficiales
+COLORES = {
     "1": "#F04E98", "2": "#0057B8", "3": "#6D8D23", 
     "4": "#6FB19C", "5": "#FFCD00", "6": "#DB2228", 
     "7": "#E46F23", "8": "#009A44", "9": "#5B3A29", 
-    "A": "#9F258F", "B": "#B0B3B2", "12": "#C19C2D"
+    "A": "#9F258F", "B": "#B0B3B2", "12": "#C19C2D",
+    "BG": "#1A1E24", "CARD": "#252A33", "TEXT": "#FFFFFF", "SUBTEXT": "#A0AAB5",
+    "ALERT": "#FF4444", "OK": "#00C851"
 }
 
-# Mapeo para detección de texto
 MAPA_LINEAS = {
     "1": "L1", "uno": "L1", "rosa": "L1",
     "2": "L2", "dos": "L2", "azul": "L2",
@@ -65,279 +68,284 @@ MAPA_LINEAS = {
     "12": "L12", "doce": "L12", "dorada": "L12"
 }
 
-ua = UserAgent()
-
 def get_headers():
     return {'User-Agent': ua.random, 'Referer': 'https://news.google.com/'}
 
-# --- GENERADOR DE IMAGEN (DASHBOARD) ---
+# --- MOTOR GRÁFICO (MODO DISEÑADOR) ---
 def descargar_fuente():
-    """Descarga una fuente Google Font para asegurar que se vea bien."""
     try:
-        url_font = "https://github.com/google/fonts/raw/main/apache/robotoslab/RobotoSlab-Bold.ttf"
-        r = requests.get(url_font)
-        return io.BytesIO(r.content)
+        # Usamos Roboto Medium para un look app moderna
+        url = "https://github.com/google/fonts/raw/main/apache/robotoslab/RobotoSlab-Bold.ttf" 
+        return io.BytesIO(requests.get(url).content)
     except: return None
 
-def generar_tablero_visual(lineas_afectadas):
-    """
-    Crea una imagen con el estado de las 12 líneas.
-    lineas_afectadas: Diccionario {'L3': 'Humo', 'L7': 'Lento'}
-    """
-    # 1. Configuración del Lienzo
-    W, H = 800, 600
-    bg_color = (20, 24, 30) # Azul oscuro casi negro
-    img = Image.new('RGB', (W, H), color=bg_color)
+def dibujar_tarjeta(draw, x, y, w, h, linea, estado, color_linea, font_l, font_s):
+    # Fondo tarjeta
+    color_borde = COLORES["ALERT"] if estado != "Normal" else COLORES["CARD"]
+    bg_card = "#2C333D" if estado == "Normal" else "#381E1E" # Fondo rojizo si hay falla
+    
+    draw.rounded_rectangle([x, y, x+w, y+h], radius=12, fill=bg_card, outline=color_borde, width=2 if estado != "Normal" else 0)
+    
+    # Pill de la Línea (Círculo/Elipse)
+    draw.ellipse([x+10, y+10, x+45, y+45], fill=color_linea)
+    
+    # Texto Línea (Centrado manualmente)
+    offset_x = 10 if len(linea) > 2 else 13
+    draw.text((x+offset_x, y+12), linea.replace("L",""), font=font_l, fill="white")
+    
+    # Texto Estado
+    color_status = COLORES["OK"] if estado == "Normal" else COLORES["ALERT"]
+    draw.text((x+55, y+15), estado[:18], font=font_s, fill=color_status)
+
+def generar_tablero_visual(afectaciones):
+    """Genera un dashboard tipo App Móvil"""
+    W, H = 800, 500 # Más compacto
+    img = Image.new('RGB', (W, H), color=COLORES["BG"])
     draw = ImageDraw.Draw(img)
     
-    # 2. Cargar Fuente
-    font_bytes = descargar_fuente()
+    fb = descargar_fuente()
     try:
-        font_title = ImageFont.truetype(font_bytes, 40)
-        font_line = ImageFont.truetype(font_bytes, 30)
-        font_status = ImageFont.truetype(font_bytes, 18)
+        f_title = ImageFont.truetype(fb, 36)
+        f_line = ImageFont.truetype(fb, 22)
+        f_status = ImageFont.truetype(fb, 18)
+        f_sub = ImageFont.truetype(fb, 14)
     except:
-        font_title = ImageFont.load_default()
-        font_line = ImageFont.load_default()
-        font_status = ImageFont.load_default()
+        f_title = f_line = f_status = f_sub = ImageFont.load_default()
 
-    # 3. Título y Fecha
-    ahora = datetime.now(pytz.timezone('America/Mexico_City')).strftime("%I:%M %p | %d-%b")
-    draw.text((30, 20), "ESTADO DE LA RED - JJMEX HUB", font=font_title, fill=(255, 255, 255))
-    draw.text((30, 70), f"Actualización: {ahora}", font=font_status, fill=(200, 200, 200))
-
-    # 4. Dibujar Grilla de Líneas
-    # Orden de las líneas para el dibujo
-    orden = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "12"]
+    # Header
+    now = datetime.now(pytz.timezone('America/Mexico_City'))
+    draw.text((30, 25), "ESTADO DEL SERVICIO", font=f_title, fill="white")
+    draw.text((30, 70), f"Última actualización: {now.strftime('%I:%M %p • %d %b')}", font=f_sub, fill=COLORES["SUBTEXT"])
     
-    start_x, start_y = 30, 120
-    box_w, box_h = 170, 100
-    gap = 20
-    cols = 4
+    # Línea divisoria
+    draw.line([(30, 95), (770, 95)], fill=COLORES["CARD"], width=2)
 
-    for i, linea_key in enumerate(orden):
-        # Calcular posición
-        row = i // cols
-        col = i % cols
-        x = start_x + (col * (box_w + gap))
-        y = start_y + (row * (box_h + gap))
-        
-        # Determinar Estado
-        nombre_linea = f"L{linea_key}" if linea_key not in ["A", "B"] else f"L{linea_key}"
-        color_hex = COLORES_LINEAS[linea_key]
-        
-        estado_texto = "NORMAL"
-        status_color = (0, 200, 100) # Verde
-        
-        # Verificar si esta línea está en las afectadas
-        if nombre_linea in lineas_afectadas:
-            estado_texto = lineas_afectadas[nombre_linea].upper()[:15] # Cortar si es muy largo
-            status_color = (255, 50, 50) # Rojo Alerta
-        
-        # Dibujar Caja (Borde)
-        draw.rounded_rectangle([x, y, x+box_w, y+box_h], radius=10, outline=color_hex, width=3)
-        
-        # Etiqueta de Línea (Círculo de color)
-        draw.ellipse([x+10, y+10, x+50, y+50], fill=color_hex)
-        # Texto del número/letra centrado en el círculo (Ajuste manual simple)
-        text_w = draw.textlength(linea_key, font=font_line)
-        draw.text((x+30-(text_w/2), y+12), linea_key, font=font_line, fill=(255,255,255))
-        
-        # Texto de Estado
-        draw.text((x+60, y+15), "Estado:", font=font_status, fill=(150, 150, 150))
-        draw.text((x+10, y+60), estado_texto, font=font_status, fill=status_color)
+    # Grid (2 Columnas x 6 Filas) para mejor lectura móvil
+    lineas = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "12"]
+    start_x, start_y = 30, 115
+    col_w, row_h = 360, 55
+    gap_x, gap_y = 20, 10
 
-    # Guardar en memoria
+    for i, l_key in enumerate(lineas):
+        # Lógica de posición
+        col = i % 2
+        row = i // 2
+        x = start_x + (col * (col_w + gap_x))
+        y = start_y + (row * (row_h + gap_y))
+        
+        # Datos
+        l_name = f"L{l_key}"
+        estado = afectaciones.get(l_name, "Normal")
+        
+        dibujar_tarjeta(draw, x, y, col_w, row_h, l_key, estado, COLORES[l_key], f_line, f_status)
+
+    # Footer
+    draw.text((W-150, H-30), "JJMex Intelligence", font=f_sub, fill=COLORES["SUBTEXT"])
+    
     bio = io.BytesIO()
     img.save(bio, 'PNG')
     bio.seek(0)
     return bio
 
-def enviar_telegram_con_foto(texto, imagen_bio):
-    """Envía mensaje con foto usando multipart/form-data"""
+# --- FUNCIONES DE TELEGRAM ---
+def enviar_multimedia(texto, imagen):
     if not TOKEN or not DESTINATARIOS: return
-    
     for chat_id in DESTINATARIOS:
         try:
-            imagen_bio.seek(0) # Reiniciar puntero
-            url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
-            payload = {'chat_id': chat_id, 'caption': texto, 'parse_mode': 'HTML'}
-            files = {'photo': ('estado.png', imagen_bio, 'image/png')}
-            
-            requests.post(url, data=payload, files=files, timeout=20)
-        except Exception as e:
-            print(f"Error enviando foto a {chat_id}: {e}")
+            imagen.seek(0)
+            requests.post(
+                f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
+                data={'chat_id': chat_id, 'caption': texto, 'parse_mode': 'HTML'},
+                files={'photo': ('status.png', imagen, 'image/png')},
+                timeout=20
+            )
+        except Exception as e: print(f"Error TG: {e}")
 
-def enviar_telegram_texto(mensaje):
+def enviar_texto(texto):
     if not TOKEN or not DESTINATARIOS: return
     for chat_id in DESTINATARIOS:
         try:
-            url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-            data = {'chat_id': chat_id, 'text': mensaje, 'parse_mode': 'HTML', 'disable_web_page_preview': True}
-            requests.post(url, data=data, timeout=10)
+            requests.post(
+                f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                data={'chat_id': chat_id, 'text': texto, 'parse_mode': 'HTML', 'disable_web_page_preview': True},
+                timeout=10
+            )
         except: pass
 
-# --- FUNCIONES DE ANÁLISIS (CORE) ---
-def analizar_sentimiento(texto):
-    if any(p in texto.lower() for p in PALABRAS_SOLUCION): return "✅" 
-    return "🚨"
-
-def detectar_problemas_por_linea(texto):
-    """Devuelve un dict: {'L3': 'Humo', 'L1': 'Retrasos'}"""
-    texto = texto.lower()
-    frases = re.split(r'[.;\n]', texto) 
-    detectados = {}
-
-    for frase in frases:
-        if len(frase) < 10: continue
-        
-        lineas_presentes = []
-        for k, v in MAPA_LINEAS.items():
-            patrones = [f"línea {k}", f"linea {k}", f"l{k} ", f"l-{k}"]
-            if len(k) < 2: patrones = [f"línea {k}", f"linea {k}", f"l-{k}"]
-            if any(p in frase for p in patrones):
-                lineas_presentes.append(v)
-        
-        if lineas_presentes:
-            causas = [val for key, val in CAUSAS.items() if key in frase]
-            causa_str = ", ".join(list(set(causas))) if causas else "Afectación"
-            
-            for linea in lineas_presentes:
-                if linea not in detectados or "Afectación" in detectados[linea]:
-                    detectados[linea] = causa_str
-    return detectados
-
-def resolver_redireccion_google(url_inicial, fuente=""):
+# --- CEREBRO DE ANÁLISIS ---
+def resolver_redireccion_google(url, fuente=""):
+    """
+    ELITE FIX: Prioriza URLs que contengan el nombre de la fuente.
+    Evita caer en trampas de analytics.
+    """
     try:
         session = requests.Session()
-        resp = session.get(url_inicial, headers=get_headers(), timeout=15, verify=False, allow_redirects=True)
+        r = session.get(url, headers=get_headers(), timeout=10, verify=False, allow_redirects=True)
         
-        basura = ["google", "gstatic", "youtube", "analytics", "doubleclick", "facebook", "twitter"]
-        if "google" in resp.url:
-            fuente_clean = fuente.lower().replace(" ", "").replace("tv", "") if fuente else "xyz"
-            raw_urls = re.findall(r'(https?:\/\/[^"\s<>\\]+)', resp.text)
+        # Lista negra ampliada
+        basura = ["google", "gstatic", "youtube", "analytics", "doubleclick", "facebook", "twitter", "googletagmanager", "scorecardresearch"]
+        
+        if "google" in r.url:
+            print(f"   ⚠️ URL Ofuscada. Fuente esperada: '{fuente}'")
+            # Normalizar nombre fuente (ej: "TV Azteca" -> "azteca")
+            fuente_clean = fuente.lower().replace(" ", "").replace("tv", "").replace("noticias", "").replace("diario","")
+            if len(fuente_clean) < 3: fuente_clean = "xxxxx"
+
+            candidates = re.findall(r'(https?:\/\/[^"\s<>\\]+)', r.text)
             
-            candidato = None
-            for r in raw_urls:
-                u = unquote(r).replace("\\u0026", "&").replace("\\", "")
+            best_match = None
+            generic_match = None
+            
+            for c in candidates:
+                u = unquote(c).replace("\\u0026", "&").replace("\\", "")
                 if any(b in u for b in basura) or len(u) < 25: continue
-                if fuente_clean in u.lower(): return session.get(u, headers=get_headers(), timeout=15, verify=False)
-                if not candidato: candidato = u
-            if candidato: return session.get(candidato, headers=get_headers(), timeout=15, verify=False)
-        return resp
+                if u.endswith(('.png','.jpg','.js','.css','.woff')): continue
+
+                # EL FILTRO DE ORO:
+                if fuente_clean in u.lower():
+                    print(f"   🎯 MATCH DE FUENTE: {u[:50]}...")
+                    return session.get(u, headers=get_headers(), timeout=10, verify=False)
+                
+                if not generic_match: generic_match = u
+            
+            # Si no hay match de fuente, usamos el genérico (pero es arriesgado)
+            target = best_match or generic_match
+            if target: return session.get(target, headers=get_headers(), timeout=10, verify=False)
+            
+        return r
     except: return None
 
-def espiar_noticia(url, fuente=""):
+def espiar_web(url, fuente=""):
     try:
         resp = resolver_redireccion_google(url, fuente)
         if resp and resp.status_code == 200:
             soup = BeautifulSoup(resp.text, 'html.parser')
-            # JSON-LD
-            scripts = soup.find_all('script', type='application/ld+json')
-            for s in scripts:
+            # 1. JSON-LD (La forma más limpia)
+            for s in soup.find_all('script', type='application/ld+json'):
                 if s.string:
                     try:
                         d = json.loads(s.string)
                         if isinstance(d, list): d=d[0]
                         if 'articleBody' in d: return d['articleBody']
                     except: continue
-            # HTML
-            for t in soup(["script", "style", "nav", "footer", "header", "ads", "iframe"]): t.extract()
-            textos = [t.get_text().strip() for t in soup.find_all(['p','li','h1','h2']) if len(t.get_text().strip())>20]
+            
+            # 2. HTML Limpieza profunda
+            for t in soup(["script", "style", "nav", "footer", "header", "ads", "iframe", "aside", "form"]): t.extract()
+            # Buscar en listas (li) y párrafos (p)
+            textos = [t.get_text().strip() for t in soup.find_all(['p','li','h1','h2','h3']) if len(t.get_text().strip()) > 25]
             return " ".join(textos)
     except: pass
     return ""
 
-def revisar_incidentes(ahora):
-    incidentes_texto = []
-    todas_afectaciones = {} # Acumulador de todas las líneas fallando
+def detectar_problemas(texto):
+    """Devuelve {'L3': 'Retraso', 'L1': 'Lluvia'}"""
+    texto = texto.lower()
+    frases = re.split(r'[.;\n|]', texto) # Dividir mejor
+    res = {}
     
-    # 1. GOOGLE NEWS
+    for f in frases:
+        if len(f) < 10: continue
+        lineas = []
+        for k, v in MAPA_LINEAS.items():
+            # Regex simple para evitar falsos positivos (ej: 'uno' en 'alguno')
+            if re.search(fr'\b{k}\b' if k.isdigit() else k, f):
+                lineas.append(v)
+            elif f"linea {k}" in f or f"l{k} " in f:
+                lineas.append(v)
+        
+        if lineas:
+            # Buscar causa en esa misma frase
+            found_causes = [val for key, val in CAUSAS.items() if key in f]
+            cause_txt = ", ".join(list(set(found_causes))) if found_causes else "Afectación"
+            
+            for l in set(lineas): # Usar set para únicos
+                if l not in res or "Afectación" in res[l]:
+                    res[l] = cause_txt
+    return res
+
+def revisar_todo(ahora):
+    msgs = []
+    afectaciones_totales = {}
+    
+    # 1. RSS
     try:
-        print("🔎 Analizando Noticias...")
+        print("🔎 RSS Scan...")
         feed = feedparser.parse(RSS_URL)
         limite = ahora - timedelta(minutes=65)
+        
         for e in feed.entries:
-            if hasattr(e, 'published_parsed'):
-                f = datetime(*e.published_parsed[:6], tzinfo=pytz.utc).astimezone(ahora.tzinfo)
-                if f > limite:
-                    txt = f"{e.title}. {e.summary if hasattr(e,'summary') else ''}"
+            if hasattr(e,'published_parsed'):
+                dt = datetime(*e.published_parsed[:6], tzinfo=pytz.utc).astimezone(ahora.tzinfo)
+                if dt > limite:
+                    # Análisis Escalonado
+                    txt_base = f"{e.title}. {e.summary if hasattr(e,'summary') else ''}"
                     fuente = e.source.title if hasattr(e,'source') else ""
                     
-                    if any(p in txt.lower() for p in list(CAUSAS.keys())+["afectaciones"]):
-                        print(f"👉 Noticia: {e.title[:30]}...")
-                        probs = detectar_problemas_por_linea(txt)
+                    if any(w in txt_base.lower() for w in CAUSAS.keys()):
+                        print(f"👉 Detectado: {e.title[:30]}")
+                        probs = detectar_problemas(txt_base)
+                        
+                        # Si no hay detalle, vamos profundo
                         if not probs:
-                            web_txt = espiar_noticia(e.link, fuente)
-                            probs = detectar_problemas_por_linea(txt + " " + web_txt)
+                            print("   🕵️ Deep Scan activado...")
+                            web_content = espiar_web(e.link, fuente)
+                            probs = detectar_problemas(txt_base + " " + web_content)
                         
-                        todas_afectaciones.update(probs) # Guardar para la imagen
-                        
-                        emoji = analizar_sentimiento(e.title)
-                        detalle = "\n".join([f"⚠️ {k}: {v}" for k,v in probs.items()])
-                        incidentes_texto.append(f"{emoji} <b>NOTICIA:</b> {e.title}\n{detalle}\n🔗 <a href='{e.link}'>Leer más</a>")
-    except Exception as e: print(f"Error RSS: {e}")
+                        if probs:
+                            afectaciones_totales.update(probs)
+                            emoji = "✅" if any(s in e.title.lower() for s in PALABRAS_SOLUCION) else "🚨"
+                            detalles = "\n".join([f"• <b>{k}:</b> {v}" for k,v in probs.items()])
+                            msgs.append(f"{emoji} <b>NOTICIA:</b> {e.title}\n{detalles}\n🔗 <a href='{e.link}'>Leer Nota</a>")
+    except Exception as ex: print(f"RSS Error: {ex}")
 
-    # 2. NITTER
+    # 2. NITTER (Respaldo)
     for inst in ["nitter.privacydev.net", "nitter.net"]:
         try:
-            print(f"🦅 Nitter ({inst})...")
+            print(f"🦅 Twitter Scan ({inst})...")
             scraper = Nitter(log_level=1, skip_instance_check=False, instance=inst)
-            data = scraper.get_tweets("MetroCDMX", mode='user', number=5)
-            if data and 'tweets' in data:
-                for t in data['tweets']:
-                    txt = t['text'].lower()
-                    if any(p in txt for p in list(CAUSAS.keys())+["servicio"]) and not any(i in txt for i in IGNORAR):
-                        if "m" in t['date'] or "1h" in t['date']:
-                            probs = detectar_problemas_por_linea(txt)
-                            todas_afectaciones.update(probs)
-                            
-                            emoji = analizar_sentimiento(txt)
-                            detalle = "\n".join([f"⚠️ {k}: {v}" for k,v in probs.items()])
-                            incidentes_texto.append(f"{emoji} <b>OFICIAL:</b> {t['text']}\n{detalle}\n🔗 <a href='{t['link']}'>Ver Tweet</a>")
+            tweets = scraper.get_tweets("MetroCDMX", mode='user', number=4)
+            if tweets and 'tweets' in tweets:
+                for t in tweets['tweets']:
+                    if "m" in t['date'] or "1h" in t['date']:
+                        txt = t['text'].lower()
+                        if any(w in txt for w in CAUSAS.keys()) and not any(ig in txt for ig in IGNORAR):
+                            probs = detectar_problemas(txt)
+                            afectaciones_totales.update(probs)
+                            msgs.append(f"🚨 <b>OFICIAL:</b> {t['text']}\n🔗 <a href='{t['link']}'>Ver Tweet</a>")
                 break
         except: continue
 
-    return incidentes_texto, todas_afectaciones
-
-def verificar_horario(ahora):
-    d, h = ahora.weekday(), ahora.hour
-    if d<=4 and h==5: return "🚇 <b>INICIO DE SERVICIO</b>"
-    if d==5 and h==6: return "🚇 <b>INICIO SÁBADO</b>"
-    if d==6 and h==7: return "🚇 <b>INICIO DOMINGO</b>"
-    if h==0: return "💤 <b>CIERRE DE SERVICIO</b>"
-    return None
+    return msgs, afectaciones_totales
 
 def main():
     tz = pytz.timezone('America/Mexico_City')
-    ahora = datetime.now(tz)
-    print(f"🏁 JJMex Scan: {ahora}")
-
-    # Ping técnico (solo texto)
-    enviar_telegram_texto("📡 <i>Conectando con la red de movilidad y analizando reportes ciudadanos...</i>")
+    now = datetime.now(tz)
+    print(f"🏁 Start: {now}")
     
-    # 1. Horario
-    msg_h = verificar_horario(ahora)
-    if msg_h: enviar_telegram_texto(msg_h + FIRMA); return
+    enviar_texto("📡 <i>Sincronizando red...</i>")
+    
+    # Horarios
+    d, h = now.weekday(), now.hour
+    msg_h = None
+    if d<=4 and h==5: msg_h = "🚇 <b>APERTURA DE SERVICIO</b>"
+    elif h==0: msg_h = "💤 <b>CIERRE DE SERVICIO</b>"
+    if msg_h: enviar_texto(msg_h + FIRMA); return
 
-    # 2. Incidentes
-    textos, mapa_fallas = revisar_incidentes(ahora)
+    # Incidentes
+    textos, fallas = revisar_todo(now)
     
     if textos:
-        # Generar IMAGEN DEL TABLERO
-        print(f"🎨 Generando tablero con fallas en: {list(mapa_fallas.keys())}")
-        imagen_bio = generar_tablero_visual(mapa_fallas)
+        print(f"🎨 Pintando dashboard: {fallas}")
+        img = generar_tablero_visual(fallas)
         
-        # Eliminar duplicados de texto
-        msgs_unicos = list(dict.fromkeys(textos))
-        caption = f"📢 <b>REPORTE VISUAL JJMEX ({ahora.strftime('%I:%M %p')})</b>\n──────────────────\n" + "\n\n".join(msgs_unicos) + FIRMA
+        # Eliminar duplicados y armar caption
+        uniques = list(dict.fromkeys(textos))
+        caption = f"📢 <b>REPORTE ({now.strftime('%I:%M %p')})</b>\n──────────────────\n" + "\n\n".join(uniques) + FIRMA
         
-        # Enviar FOTO + TEXTO
-        enviar_telegram_con_foto(caption[:1024], imagen_bio)
+        enviar_multimedia(caption[:1024], img)
     else:
-        # Todo bien (Enviar solo texto o imagen verde opcional)
-        print("✅ Todo normal.")
-        enviar_telegram_texto("✅ <b>Sin incidentes críticos.</b>\nLa red opera con normalidad." + FIRMA)
+        print("✅ Todo normal")
+        enviar_texto("✅ <b>Sistema operando con normalidad.</b>\nSin incidentes críticos reportados." + FIRMA)
 
 if __name__ == "__main__":
     main()
