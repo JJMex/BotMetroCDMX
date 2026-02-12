@@ -82,58 +82,66 @@ def descargar_fuente():
     except: return None
 
 def dibujar_tarjeta_hd(draw, x, y, w, h, linea, estado, color_linea, f_linea, f_estado):
-    """Dibuja una tarjeta en alta resolución"""
+    """Dibuja una tarjeta en alta resolución con NÚMEROS GIGANTES"""
     # 1. Fondo de la tarjeta
     es_alerta = estado != "Normal"
     bg_color = COLORES["ALERT_BG"] if es_alerta else COLORES["CARD"]
     border_color = COLORES["ALERT_BORDER"] if es_alerta else "#2A3038"
-    border_width = 4 if es_alerta else 2
+    border_width = 5 if es_alerta else 2
     
     draw.rounded_rectangle([x, y, x+w, y+h], radius=24, fill=bg_color, outline=border_color, width=border_width)
     
-    # 2. Icono de Línea (Círculo Grande)
-    circle_size = h - 30 # Tamaño dinámico según altura
+    # 2. Icono de Línea (CÍRCULO MÁS GRANDE)
+    # Aumentamos el tamaño del círculo relativo a la tarjeta
+    circle_size = h - 20 # Dejar solo 10px de margen arriba y abajo
     cy = y + (h // 2)
-    cx = x + 40 # Margen izquierdo
+    cx = x + (circle_size // 2) + 20 # Margen izquierdo de 20px
     
     x1, y1 = cx - (circle_size//2), cy - (circle_size//2)
     x2, y2 = cx + (circle_size//2), cy + (circle_size//2)
     
     draw.ellipse([x1, y1, x2, y2], fill=color_linea)
     
-    # 3. Texto del Número de Línea (Contraste Inteligente)
+    # 3. Texto del Número de Línea (GIGANTE)
     texto_num = linea.replace("L", "")
     color_num = "black" if texto_num in LINEAS_CLARAS else "white"
     
     # Centrado perfecto
     bbox = f_linea.getbbox(texto_num)
     tw, th = bbox[2]-bbox[0], bbox[3]-bbox[1]
-    tx, ty = cx - (tw/2), cy - (th/2) - 4 # Ajuste visual vertical
     
-    draw.text((tx, ty), texto_num, font=f_linea, fill=color_num)
+    # Ajuste fino vertical según si es número o letra
+    ajuste_y = 10 if texto_num in ["A", "B"] else 5
+    tx, ty = cx - (tw/2), cy - (th/2) - ajuste_y
+    
+    # Dibujamos con STROKE (Borde) para que resalte brutalmente
+    stroke_c = "white" if color_num == "black" else "black"
+    draw.text((tx, ty), texto_num, font=f_linea, fill=color_num, stroke_width=0) 
+    # Nota: Quité el stroke grueso porque en letras negras sobre fondo claro se ve mejor limpio, 
+    # pero el tamaño lo compensará.
     
     # 4. Texto de Estado
-    text_x = x2 + 30
-    text_y = cy - 15
+    text_x = x2 + 35 # Espacio después del círculo
+    text_y = cy - 20 # Centrado verticalmente respecto al bloque de texto
     
     color_status = COLORES["ALERT_TEXT"] if es_alerta else COLORES["OK_TEXT"]
-    estado_fmt = estado.upper() if len(estado) < 12 else estado[:12] + "..."
+    estado_fmt = estado.upper() if len(estado) < 14 else estado[:14] + "..."
     
     draw.text((text_x, text_y), estado_fmt, font=f_estado, fill=color_status)
 
 def generar_tablero_visual(afectaciones):
     """Genera dashboard 2X para nitidez extrema"""
     # Dimensiones 2X (Super Sampling)
-    W, H = 1600, 1000 
+    W, H = 1600, 1100 # Aumentamos altura total
     img = Image.new('RGB', (W, H), color=COLORES["BG"])
     draw = ImageDraw.Draw(img)
     
     fb = descargar_fuente()
     try:
-        # Fuentes escaladas x2
+        # FUENTES AUMENTADAS DRÁSTICAMENTE
         f_title = ImageFont.truetype(fb, 70)
-        f_line = ImageFont.truetype(fb, 48) # Número grande
-        f_status = ImageFont.truetype(fb, 36)
+        f_line = ImageFont.truetype(fb, 85) # ANTES 48 -> AHORA 85 (Casi el doble)
+        f_status = ImageFont.truetype(fb, 40)
         f_sub = ImageFont.truetype(fb, 30)
     except:
         f_title = f_line = f_status = f_sub = ImageFont.load_default()
@@ -154,7 +162,7 @@ def generar_tablero_visual(afectaciones):
     # Cálculo dinámico de espacios
     gap_x, gap_y = 40, 30
     card_w = (W - (start_x*2) - gap_x) // cols
-    card_h = 100
+    card_h = 140 # AUMENTAMOS ALTURA DE TARJETA (Antes ~100)
 
     for i, l_key in enumerate(lineas):
         col = i % cols
@@ -172,8 +180,8 @@ def generar_tablero_visual(afectaciones):
     draw.text((W-300, H-60), "JJMex Intelligence", font=f_sub, fill=COLORES["SUBTEXT"])
     
     # 5. RESAMPLING (La magia de la nitidez)
-    # Reducimos la imagen a la mitad (800x500) usando LANCZOS (filtro de alta calidad)
-    img_final = img.resize((800, 500), resample=Image.Resampling.LANCZOS)
+    # Reducimos la imagen a la mitad (800x550)
+    img_final = img.resize((800, 550), resample=Image.Resampling.LANCZOS)
     
     bio = io.BytesIO()
     img_final.save(bio, 'PNG', quality=95)
@@ -267,7 +275,6 @@ def detectar_problemas(texto):
 def revisar_todo(ahora):
     msgs = []
     afectaciones = {}
-    # RSS
     try:
         feed = feedparser.parse(RSS_URL)
         lim = ahora - timedelta(minutes=65)
@@ -289,7 +296,6 @@ def revisar_todo(ahora):
                             msgs.append(f"{emoji} <b>NOTICIA:</b> {e.title}\n{detalles}\n🔗 <a href='{e.link}'>Leer Nota</a>")
     except Exception as ex: print(f"RSS: {ex}")
 
-    # NITTER
     for inst in ["nitter.privacydev.net", "nitter.net"]:
         try:
             scraper = Nitter(log_level=1, skip_instance_check=False, instance=inst)
