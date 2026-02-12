@@ -3,6 +3,7 @@ import time
 import requests
 import feedparser
 import pytz
+import re
 from datetime import datetime, timedelta
 from ntscraper import Nitter
 from bs4 import BeautifulSoup
@@ -13,12 +14,10 @@ ID_GRUPO = os.environ.get('TELEGRAM_CHAT_ID')
 ID_CANAL = os.environ.get('TELEGRAM_CHANNEL_ID') 
 DESTINATARIOS = [id_ for id_ in [ID_GRUPO, ID_CANAL] if id_]
 
-# URL de búsqueda (Nota: when:1h asegura frescura)
 RSS_URL = "https://news.google.com/rss/search?q=Metro+CDMX+retraso+OR+falla+OR+caos+when:1h&hl=es-419&gl=MX&ceid=MX:es-419"
 PALABRAS_CLAVE = ["retraso", "marcha lenta", "falla", "desalojo", "humo", "detenido", "caos", "lento", "espera", "sin servicio", "colapso", "afectaciones", "avance"]
 IGNORAR = ["buenos días", "cubrebocas", "tarjeta", "arte", "exposición", "domingos y días festivos", "cultura"]
 
-# --- DICCIONARIO DE LÍNEAS ---
 MAPA_LINEAS = {
     "1": "🩷 Línea 1 (Rosa)", "uno": "🩷 Línea 1 (Rosa)", "rosa": "🩷 Línea 1 (Rosa)",
     "2": "💙 Línea 2 (Azul)", "dos": "💙 Línea 2 (Azul)", "azul": "💙 Línea 2 (Azul)",
@@ -46,92 +45,105 @@ def enviar_telegram(mensaje):
             except: time.sleep(1)
 
 def detectar_lineas(texto):
-    """Analiza texto buscando nombres, números o COLORES."""
     texto = texto.lower()
     detectadas = set()
-    
     for clave, nombre in MAPA_LINEAS.items():
-        # Patrones variados: "Línea 3", "L3", "L-3", "La verde"
         patrones = [f"línea {clave}", f"linea {clave}", f"l{clave} ", f"l-{clave}", f"la {clave} "]
-        if len(clave) < 3: patrones = [f"línea {clave}", f"linea {clave}", f"l-{clave}"] # Filtro estricto para letras
-             
+        if len(clave) < 3: patrones = [f"línea {clave}", f"linea {clave}", f"l-{clave}"]
         if any(p in texto for p in patrones):
             detectadas.add(nombre)
-            
     if detectadas:
-        lista = sorted(list(detectadas))
-        return "\n⚠️ <b>AFECTACIÓN CONFIRMADA:</b> " + ", ".join(lista)
+        return "\n⚠️ <b>AFECTACIÓN CONFIRMADA:</b> " + ", ".join(sorted(list(detectadas)))
     return ""
 
-def espiar_noticia_completa(url):
+def resolver_redireccion_google(url_inicial):
     """
-    MODO ROMPEHIELOS: Usa una sesión real y sigue redirecciones de Google.
+    Intenta desenredar la URL de Google News para llegar a la fuente real (TV Azteca, El Universal, etc).
     """
     try:
         session = requests.Session()
-        # Headers de navegador real para evitar bloqueo 403
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Referer': 'https://news.google.com/'
         }
+        # 1. Primera petición: Dejamos que requests siga redirecciones estándar
+        response = session.get(url_inicial, headers=headers, timeout=10, allow_redirects=True)
         
-        # Timeout aumentado a 10s y allow_redirects=True vital para enlaces de Google
-        response = session.get(url, headers=headers, timeout=10, allow_redirects=True)
-        
-        print(f"   ↳ Status Web: {response.status_code} | URL Final: {response.url}")
-        
-        if response.status_code == 200:
+        # 2. Verificación: ¿Seguimos atrapados en Google?
+        if "news.google.com" in response.url:
+            print("   ⚠️ Atrapado en redirección de Google. Buscando enlace real...")
             soup = BeautifulSoup(response.text, 'html.parser')
-            # Extraemos párrafos y también encabezados h1, h2 (a veces la info está ahí)
-            textos = soup.find_all(['p', 'h1', 'h2'])
+            
+            # Google suele poner el link real en un tag <a> que dice "Abrir" o similar
+            # Buscamos cualquier link que NO sea de google
+            links = soup.find_all('a', href=True)
+            for link in links:
+                href = link['href']
+                if "google.com" not in href and href.startswith("http"):
+                    print(f"   🎯 Enlace real encontrado: {href}")
+                    # Hacemos una SEGUNDA petición, ahora sí a la web real
+                    response_real = session.get(href, headers=headers, timeout=10)
+                    return response_real
+        
+        return response # Si ya no estamos en Google, devolvemos la respuesta directa
+        
+    except Exception as e:
+        print(f"   ❌ Error resolviendo URL: {e}")
+        return None
+
+def espiar_noticia_completa(url):
+    try:
+        # Usamos la nueva función inteligente
+        response = resolver_redireccion_google(url)
+        
+        if response and response.status_code == 200:
+            print(f"   ↳ Leyendo contenido de: {response.url[:40]}...")
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Extraemos texto de párrafos y encabezados
+            textos = soup.find_all(['p', 'h1', 'h2', 'article'])
             texto_completo = " ".join([t.get_text() for t in textos])
             return texto_completo
     except Exception as e:
         print(f"   ↳ Error espiando: {e}")
-        return ""
     return ""
 
 def revisar_incidentes(ahora):
     incidentes = []
     
-    # --- 1. GOOGLE NEWS ---
+    # --- GOOGLE NEWS ---
     try:
         print("🔎 Analizando Noticias...")
         feed = feedparser.parse(RSS_URL)
-        limite = ahora - timedelta(minutes=65)
+        limite = ahora - timedelta(minutes=65) # Ventana de tiempo
         
         for e in feed.entries:
             if hasattr(e, 'published_parsed'):
                 f = datetime(*e.published_parsed[:6], tzinfo=pytz.utc).astimezone(ahora.tzinfo)
                 if f > limite:
                     titulo = e.title
-                    # Google a veces pone el resumen en 'summary' o 'description'
-                    descripcion = getattr(e, 'summary', '') or getattr(e, 'description', '')
                     
                     if any(p in titulo.lower() for p in PALABRAS_CLAVE):
                         print(f"👉 Posible incidente: {titulo[:30]}...")
                         
-                        # 1. Buscamos en Título + Descripción RSS (Rápido)
-                        texto_analisis = f"{titulo} {descripcion}"
-                        tag_linea = detectar_lineas(texto_analisis)
+                        # 1. Detección rápida (Título)
+                        tag_linea = detectar_lineas(titulo)
                         
-                        # 2. Si falló, activamos el ESPÍA (Lento pero seguro)
+                        # 2. Si falla, activamos MODO ESPÍA MEJORADO
                         if not tag_linea:
-                            print("   🕵️ Activando escaneo profundo web...")
+                            print("   🕵️ Activando escaneo profundo...")
                             texto_web = espiar_noticia_completa(e.link)
                             tag_linea = detectar_lineas(texto_web)
-                            if tag_linea: print(f"   ✅ Líneas encontradas en web: {tag_linea}")
-                            else: print("   ❌ No se encontraron líneas ni en la web.")
+                            if tag_linea: print(f"   ✅ ¡Líneas detectadas!: {tag_linea}")
+                            else: print("   ❌ No se encontraron líneas en el texto.")
                         
                         incidentes.append(f"📰 <b>NOTICIA:</b> {titulo}{tag_linea}\n🔗 <a href='{e.link}'>Ver Nota</a>")
     except Exception as e: print(f"Error RSS: {e}")
 
-    # --- 2. TWITTER ---
-    instancias = ["nitter.privacydev.net", "nitter.net", "nitter.cz"]
+    # --- TWITTER (Nitter) ---
+    instancias = ["nitter.privacydev.net", "nitter.net"]
     for instancia in instancias:
         try:
-            print(f"🦅 Probando Nitter ({instancia})...")
+            print(f"🦅 Nitter ({instancia})...")
             scraper = Nitter(log_level=1, skip_instance_check=False, instance=instancia)
             data = scraper.get_tweets("MetroCDMX", mode='user', number=5)
             if data and 'tweets' in data:
@@ -147,8 +159,7 @@ def revisar_incidentes(ahora):
     return incidentes
 
 def verificar_horario_servicio(ahora):
-    dia = ahora.weekday() 
-    hora = ahora.hour
+    dia = ahora.weekday(); hora = ahora.hour
     if dia <= 4 and hora == 5: return "🚇 <b>INICIO DE SERVICIO</b>\n──────────────────\nLa red del Metro inicia operaciones."
     elif dia == 5 and hora == 6: return "🚇 <b>INICIO DE SERVICIO (SÁBADO)</b>\n──────────────────\nInicia operación de fin de semana."
     elif dia == 6 and hora == 7: return "🚇 <b>INICIO DE SERVICIO (DOMINGO)</b>\n──────────────────\nServicio dominical iniciado."
@@ -160,14 +171,11 @@ def main():
     ahora = datetime.now(tz_mx)
     print(f"🏁 Escaneo iniciado: {ahora}")
     
-    # 1. Conexión
     enviar_telegram("📡 <i>Conectando con la red de movilidad y analizando reportes ciudadanos...</i>")
     
-    # 2. Turno
     msg = verificar_horario_servicio(ahora)
     if msg: enviar_telegram(msg); return
 
-    # 3. Incidentes
     reportes = revisar_incidentes(ahora)
     if reportes:
         un = list(dict.fromkeys(reportes))
