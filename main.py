@@ -53,7 +53,7 @@ COLORES = {
     "ALERT_BG": "#3B1E1E", "ALERT_BORDER": "#EF4444", "OK_TEXT": "#34D399", "ALERT_TEXT": "#F87171"
 }
 
-# Líneas que requieren texto NEGRO por ser muy claras
+# Líneas que requieren texto NEGRO por ser muy claras (Amarilla, Verde agua, Verde 8, Gris, Dorada)
 LINEAS_CLARAS = ["4", "5", "8", "B", "12"]
 
 MAPA_LINEAS = {
@@ -82,87 +82,96 @@ def descargar_fuente():
     except: return None
 
 def dibujar_tarjeta_hd(draw, x, y, w, h, linea, estado, color_linea, f_linea, f_estado):
-    """Dibuja una tarjeta en alta resolución con NÚMEROS GIGANTES"""
+    """Dibuja una tarjeta en alta resolución con AJUSTE DE PROPORCIÓN"""
     # 1. Fondo de la tarjeta
     es_alerta = estado != "Normal"
     bg_color = COLORES["ALERT_BG"] if es_alerta else COLORES["CARD"]
     border_color = COLORES["ALERT_BORDER"] if es_alerta else "#2A3038"
-    border_width = 5 if es_alerta else 2
+    border_width = 6 if es_alerta else 2
     
     draw.rounded_rectangle([x, y, x+w, y+h], radius=24, fill=bg_color, outline=border_color, width=border_width)
     
-    # 2. Icono de Línea (CÍRCULO MÁS GRANDE)
-    # Aumentamos el tamaño del círculo relativo a la tarjeta
-    circle_size = h - 20 # Dejar solo 10px de margen arriba y abajo
+    # 2. Icono de Línea (CÍRCULO)
+    # Ajustamos el tamaño: Que sea grande pero deje aire
+    padding_y = 20
+    circle_size = h - (padding_y * 2) 
+    
     cy = y + (h // 2)
-    cx = x + (circle_size // 2) + 20 # Margen izquierdo de 20px
+    cx = x + 40 + (circle_size // 2) # Margen izquierdo fijo de 40px + radio
     
     x1, y1 = cx - (circle_size//2), cy - (circle_size//2)
     x2, y2 = cx + (circle_size//2), cy + (circle_size//2)
     
     draw.ellipse([x1, y1, x2, y2], fill=color_linea)
     
-    # 3. Texto del Número de Línea (GIGANTE)
+    # 3. Texto del Número de Línea (VISIBILIDAD EXTREMA)
     texto_num = linea.replace("L", "")
     color_num = "black" if texto_num in LINEAS_CLARAS else "white"
     
-    # Centrado perfecto
+    # Centrado matemático
     bbox = f_linea.getbbox(texto_num)
-    tw, th = bbox[2]-bbox[0], bbox[3]-bbox[1]
+    tw = bbox[2] - bbox[0]
+    th = bbox[3] - bbox[1]
     
-    # Ajuste fino vertical según si es número o letra
-    ajuste_y = 10 if texto_num in ["A", "B"] else 5
-    tx, ty = cx - (tw/2), cy - (th/2) - ajuste_y
+    # Ajuste vertical fino (las fuentes suelen tener baseline variable)
+    offset_y = 8 if texto_num in ["A", "B", "12"] else 5
+    tx = cx - (tw / 2)
+    ty = cy - (th / 2) - offset_y
     
-    # Dibujamos con STROKE (Borde) para que resalte brutalmente
-    stroke_c = "white" if color_num == "black" else "black"
-    draw.text((tx, ty), texto_num, font=f_linea, fill=color_num, stroke_width=0) 
-    # Nota: Quité el stroke grueso porque en letras negras sobre fondo claro se ve mejor limpio, 
-    # pero el tamaño lo compensará.
+    draw.text((tx, ty), texto_num, font=f_linea, fill=color_num)
     
     # 4. Texto de Estado
-    text_x = x2 + 35 # Espacio después del círculo
-    text_y = cy - 20 # Centrado verticalmente respecto al bloque de texto
+    text_x = x2 + 40 # Espacio generoso después del círculo
+    text_y = cy - 20 # Centrado vertical visual
     
     color_status = COLORES["ALERT_TEXT"] if es_alerta else COLORES["OK_TEXT"]
-    estado_fmt = estado.upper() if len(estado) < 14 else estado[:14] + "..."
+    # Truncar texto si es muy largo
+    estado_fmt = estado.upper() if len(estado) < 13 else estado[:13] + "."
     
     draw.text((text_x, text_y), estado_fmt, font=f_estado, fill=color_status)
 
 def generar_tablero_visual(afectaciones):
-    """Genera dashboard 2X para nitidez extrema"""
-    # Dimensiones 2X (Super Sampling)
-    W, H = 1600, 1100 # Aumentamos altura total
+    """Genera dashboard 2X para nitidez extrema - CORREGIDO"""
+    # Dimensiones AUMENTADAS para evitar cortes
+    # Antes H=1100 (muy poco), Ahora H=1400 (suficiente para 6 filas)
+    W, H = 1600, 1400 
+    
     img = Image.new('RGB', (W, H), color=COLORES["BG"])
     draw = ImageDraw.Draw(img)
     
     fb = descargar_fuente()
     try:
-        # FUENTES AUMENTADAS DRÁSTICAMENTE
-        f_title = ImageFont.truetype(fb, 70)
-        f_line = ImageFont.truetype(fb, 85) # ANTES 48 -> AHORA 85 (Casi el doble)
-        f_status = ImageFont.truetype(fb, 40)
-        f_sub = ImageFont.truetype(fb, 30)
+        f_title = ImageFont.truetype(fb, 75)
+        # Fuente del número optimizada para no salirse del círculo
+        f_line = ImageFont.truetype(fb, 80) 
+        f_status = ImageFont.truetype(fb, 42)
+        f_sub = ImageFont.truetype(fb, 32)
     except:
         f_title = f_line = f_status = f_sub = ImageFont.load_default()
 
     # Header
     now = datetime.now(pytz.timezone('America/Mexico_City'))
-    draw.text((60, 50), "ESTADO DEL SERVICIO", font=f_title, fill="white")
-    draw.text((60, 130), f"Actualización: {now.strftime('%I:%M %p • %d %b')}", font=f_sub, fill=COLORES["SUBTEXT"])
+    draw.text((60, 60), "ESTADO DEL SERVICIO", font=f_title, fill="white")
+    draw.text((60, 150), f"Actualización: {now.strftime('%I:%M %p • %d %b')}", font=f_sub, fill=COLORES["SUBTEXT"])
     
     # Línea divisoria
-    draw.line([(60, 180), (W-60, 180)], fill="#333", width=3)
+    draw.line([(60, 200), (W-60, 200)], fill="#333", width=3)
 
     # Grid Config
     lineas = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "12"]
     cols = 2
-    start_x, start_y = 60, 220
     
-    # Cálculo dinámico de espacios
-    gap_x, gap_y = 40, 30
-    card_w = (W - (start_x*2) - gap_x) // cols
-    card_h = 140 # AUMENTAMOS ALTURA DE TARJETA (Antes ~100)
+    # Coordenadas de inicio (debajo de la línea)
+    start_x = 60
+    start_y = 240
+    
+    # Cálculos de dimensiones de tarjeta
+    gap_x = 40
+    gap_y = 30
+    
+    # Ancho de tarjeta: (Ancho total - márgenes - espacio central) / 2
+    card_w = (W - (start_x*2) - gap_x) // 2
+    card_h = 150 # Altura cómoda
 
     for i, l_key in enumerate(lineas):
         col = i % cols
@@ -177,11 +186,11 @@ def generar_tablero_visual(afectaciones):
         dibujar_tarjeta_hd(draw, x, y, card_w, card_h, l_key, estado, COLORES[l_key], f_line, f_status)
 
     # Footer
-    draw.text((W-300, H-60), "JJMex Intelligence", font=f_sub, fill=COLORES["SUBTEXT"])
+    draw.text((W-350, H-70), "JJMex Intelligence", font=f_sub, fill=COLORES["SUBTEXT"])
     
-    # 5. RESAMPLING (La magia de la nitidez)
-    # Reducimos la imagen a la mitad (800x550)
-    img_final = img.resize((800, 550), resample=Image.Resampling.LANCZOS)
+    # 5. RESAMPLING (Reducción de calidad cinematográfica)
+    # Reducimos a la mitad exacta para máxima nitidez (800x700)
+    img_final = img.resize((800, 700), resample=Image.Resampling.LANCZOS)
     
     bio = io.BytesIO()
     img_final.save(bio, 'PNG', quality=95)
@@ -219,13 +228,10 @@ def resolver_redireccion_google(url, fuente=""):
         session = requests.Session()
         r = session.get(url, headers=get_headers(), timeout=10, verify=False, allow_redirects=True)
         basura = ["google", "gstatic", "youtube", "analytics", "doubleclick", "facebook", "twitter", "googletagmanager", "scorecardresearch"]
-        
         if "google" in r.url:
-            print(f"   ⚠️ Ofuscado. Fuente: '{fuente}'")
             clean = fuente.lower().replace(" ", "").replace("tv", "").replace("noticias", "").replace("diario","")
             if len(clean) < 3: clean = "xxxxx"
             candidates = re.findall(r'(https?:\/\/[^"\s<>\\]+)', r.text)
-            
             gen_match = None
             for c in candidates:
                 u = unquote(c).replace("\\u0026", "&").replace("\\", "")
