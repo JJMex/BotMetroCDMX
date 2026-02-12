@@ -1,17 +1,9 @@
 name: Monitor Metro CDMX
 
 on:
-  # 1. AUTO-TEST AL GUARDAR CAMBIOS
   push:
-    branches:
-      - main
-      
-  # 2. BOTÓN MANUAL (Para pruebas instantáneas)
+    branches: [ main ]
   workflow_dispatch:
-
-  # 3. HORARIO DE SERVICIO (Una vez cada hora)
-  # Ejecución al minuto :05 de cada hora.
-  # El rango 11-23 y 0-6 en UTC cubre de las 5:05 AM a las 12:05 AM hora CDMX.
   schedule:
     - cron: '5 0-6,11-23 * * *'
 
@@ -30,15 +22,12 @@ jobs:
       - name: Instalar librerías
         run: |
           python -m pip install --upgrade pip
-          pip install requests ntscraper feedparser pytz beautifulsoup4 fake-useragent
+          # AGREGAMOS Pillow PARA GENERAR IMÁGENES
+          pip install requests ntscraper feedparser pytz beautifulsoup4 fake-useragent Pillow
 
       - name: Ejecutar Monitor
         env:
-          # --- CREDENCIALES ---
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          
-          # --- DESTINOS (Dual Broadcast) ---
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}       # Grupo Privado
-          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }} # Canal Público
-          
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
         run: python main.py
