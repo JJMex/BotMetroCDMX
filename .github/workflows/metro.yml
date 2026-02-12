@@ -30,14 +30,15 @@ jobs:
       - name: Instalar librerías
         run: |
           python -m pip install --upgrade pip
-          pip install requests ntscraper feedparser pytz
+          # AGREGADO: beautifulsoup4 para el Modo Espía
+          pip install requests ntscraper feedparser pytz beautifulsoup4
 
       - name: Ejecutar Monitor
         env:
           # --- CREDENCIALES ---
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           
-          # --- DESTINOS ---
+          # --- DESTINOS (Dual Broadcast) ---
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}       # Grupo Privado
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }} # Canal Público (NUEVO)
           
