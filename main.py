@@ -14,10 +14,12 @@ ID_GRUPO = os.environ.get('TELEGRAM_CHAT_ID')
 ID_CANAL = os.environ.get('TELEGRAM_CHANNEL_ID') 
 DESTINATARIOS = [id_ for id_ in [ID_GRUPO, ID_CANAL] if id_]
 
+# URL de búsqueda
 RSS_URL = "https://news.google.com/rss/search?q=Metro+CDMX+retraso+OR+falla+OR+caos+when:1h&hl=es-419&gl=MX&ceid=MX:es-419"
 PALABRAS_CLAVE = ["retraso", "marcha lenta", "falla", "desalojo", "humo", "detenido", "caos", "lento", "espera", "sin servicio", "colapso", "afectaciones", "avance"]
 IGNORAR = ["buenos días", "cubrebocas", "tarjeta", "arte", "exposición", "domingos y días festivos", "cultura"]
 
+# --- DICCIONARIO DE LÍNEAS ---
 MAPA_LINEAS = {
     "1": "🩷 Línea 1 (Rosa)", "uno": "🩷 Línea 1 (Rosa)", "rosa": "🩷 Línea 1 (Rosa)",
     "2": "💙 Línea 2 (Azul)", "dos": "💙 Línea 2 (Azul)", "azul": "💙 Línea 2 (Azul)",
@@ -45,6 +47,7 @@ def enviar_telegram(mensaje):
             except: time.sleep(1)
 
 def detectar_lineas(texto):
+    """Analiza texto buscando nombres, números o COLORES."""
     texto = texto.lower()
     detectadas = set()
     for clave, nombre in MAPA_LINEAS.items():
@@ -58,33 +61,37 @@ def detectar_lineas(texto):
 
 def resolver_redireccion_google(url_inicial):
     """
-    Intenta desenredar la URL de Google News para llegar a la fuente real (TV Azteca, El Universal, etc).
+    Técnica Avanzada: Busca la URL real oculta en el texto/HTML usando Regex,
+    ya que Google la esconde dentro de variables de Javascript.
     """
     try:
         session = requests.Session()
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         }
-        # 1. Primera petición: Dejamos que requests siga redirecciones estándar
+        
         response = session.get(url_inicial, headers=headers, timeout=10, allow_redirects=True)
         
-        # 2. Verificación: ¿Seguimos atrapados en Google?
+        # Si seguimos en Google, aplicamos Regex Hunter
         if "news.google.com" in response.url:
-            print("   ⚠️ Atrapado en redirección de Google. Buscando enlace real...")
-            soup = BeautifulSoup(response.text, 'html.parser')
+            print("   ⚠️ Detectada ofuscación de Google. Escaneando código fuente...")
             
-            # Google suele poner el link real en un tag <a> que dice "Abrir" o similar
-            # Buscamos cualquier link que NO sea de google
-            links = soup.find_all('a', href=True)
-            for link in links:
-                href = link['href']
-                if "google.com" not in href and href.startswith("http"):
-                    print(f"   🎯 Enlace real encontrado: {href}")
-                    # Hacemos una SEGUNDA petición, ahora sí a la web real
-                    response_real = session.get(href, headers=headers, timeout=10)
-                    return response_real
+            # 1. Buscamos URLs que NO sean de google dentro del HTML
+            # Este patrón busca http/https seguido de caracteres válidos
+            texto_html = response.text
+            
+            # Patrón: Busca cualquier URL que empiece con http pero que NO tenga "google" justo después
+            urls_encontradas = re.findall(r'(https?:\/\/(?!news\.google\.com|www\.google\.com)[^"\s<>\\]+)', texto_html)
+            
+            if urls_encontradas:
+                # Tomamos la primera URL larga que parezca una noticia real
+                for url_candidata in urls_encontradas:
+                    if len(url_candidata) > 20: # Evitar iconos o scripts cortos
+                        print(f"   🎯 URL Real decodificada: {url_candidata}")
+                        # Hacemos la petición a la web real
+                        return session.get(url_candidata, headers=headers, timeout=10)
         
-        return response # Si ya no estamos en Google, devolvemos la respuesta directa
+        return response 
         
     except Exception as e:
         print(f"   ❌ Error resolviendo URL: {e}")
@@ -92,14 +99,18 @@ def resolver_redireccion_google(url_inicial):
 
 def espiar_noticia_completa(url):
     try:
-        # Usamos la nueva función inteligente
+        # Usamos el nuevo resolutor con Regex
         response = resolver_redireccion_google(url)
         
         if response and response.status_code == 200:
-            print(f"   ↳ Leyendo contenido de: {response.url[:40]}...")
+            print(f"   ↳ Leyendo: {response.url[:40]}...")
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Extraemos texto de párrafos y encabezados
+            # Limpiamos scripts y estilos para que no ensucien
+            for script in soup(["script", "style"]):
+                script.extract()
+                
+            # Extraemos texto puro
             textos = soup.find_all(['p', 'h1', 'h2', 'article'])
             texto_completo = " ".join([t.get_text() for t in textos])
             return texto_completo
@@ -114,7 +125,7 @@ def revisar_incidentes(ahora):
     try:
         print("🔎 Analizando Noticias...")
         feed = feedparser.parse(RSS_URL)
-        limite = ahora - timedelta(minutes=65) # Ventana de tiempo
+        limite = ahora - timedelta(minutes=65)
         
         for e in feed.entries:
             if hasattr(e, 'published_parsed'):
@@ -125,22 +136,22 @@ def revisar_incidentes(ahora):
                     if any(p in titulo.lower() for p in PALABRAS_CLAVE):
                         print(f"👉 Posible incidente: {titulo[:30]}...")
                         
-                        # 1. Detección rápida (Título)
+                        # 1. Detección rápida
                         tag_linea = detectar_lineas(titulo)
                         
-                        # 2. Si falla, activamos MODO ESPÍA MEJORADO
+                        # 2. Si falla, activamos MODO ESPÍA REGEX
                         if not tag_linea:
                             print("   🕵️ Activando escaneo profundo...")
                             texto_web = espiar_noticia_completa(e.link)
                             tag_linea = detectar_lineas(texto_web)
                             if tag_linea: print(f"   ✅ ¡Líneas detectadas!: {tag_linea}")
-                            else: print("   ❌ No se encontraron líneas en el texto.")
+                            else: print("   ❌ No se encontraron líneas.")
                         
                         incidentes.append(f"📰 <b>NOTICIA:</b> {titulo}{tag_linea}\n🔗 <a href='{e.link}'>Ver Nota</a>")
     except Exception as e: print(f"Error RSS: {e}")
 
     # --- TWITTER (Nitter) ---
-    instancias = ["nitter.privacydev.net", "nitter.net"]
+    instancias = ["nitter.privacydev.net", "nitter.net", "nitter.cz"]
     for instancia in instancias:
         try:
             print(f"🦅 Nitter ({instancia})...")
