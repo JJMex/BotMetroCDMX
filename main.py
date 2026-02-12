@@ -50,10 +50,15 @@ COLORES = {
     "7": "#E46F23", "8": "#009A44", "9": "#5B3A29", 
     "A": "#9F258F", "B": "#B0B3B2", "12": "#C19C2D",
     "BG": "#121417", "CARD": "#1E2329", "TEXT": "#FFFFFF", "SUBTEXT": "#9CA3AF",
-    "ALERT_BG": "#3B1E1E", "ALERT_BORDER": "#EF4444", "OK_TEXT": "#34D399", "ALERT_TEXT": "#F87171"
+    
+    # ALERTAS: Fondo rojo oscuro, Borde rojo brillante, TEXTO BLANCO (Para leerse bien)
+    "ALERT_BG": "#4A1010", 
+    "ALERT_BORDER": "#FF4444", 
+    "OK_TEXT": "#34D399", # Verde brillante
+    "ALERT_TEXT": "#FFFFFF" # BLANCO PURO para máximo contraste
 }
 
-# Líneas que requieren texto NEGRO por ser muy claras (Amarilla, Verde agua, Verde 8, Gris, Dorada)
+# Líneas que requieren texto NEGRO por ser muy claras
 LINEAS_CLARAS = ["4", "5", "8", "B", "12"]
 
 MAPA_LINEAS = {
@@ -82,58 +87,61 @@ def descargar_fuente():
     except: return None
 
 def dibujar_tarjeta_hd(draw, x, y, w, h, linea, estado, color_linea, f_linea, f_estado):
-    """Dibuja una tarjeta en alta resolución con AJUSTE DE PROPORCIÓN"""
+    """Dibuja una tarjeta en alta resolución con TIPOGRAFÍA JUMBO"""
     # 1. Fondo de la tarjeta
     es_alerta = estado != "Normal"
     bg_color = COLORES["ALERT_BG"] if es_alerta else COLORES["CARD"]
     border_color = COLORES["ALERT_BORDER"] if es_alerta else "#2A3038"
-    border_width = 6 if es_alerta else 2
+    border_width = 8 if es_alerta else 3 # Borde más grueso
     
-    draw.rounded_rectangle([x, y, x+w, y+h], radius=24, fill=bg_color, outline=border_color, width=border_width)
+    draw.rounded_rectangle([x, y, x+w, y+h], radius=30, fill=bg_color, outline=border_color, width=border_width)
     
-    # 2. Icono de Línea (CÍRCULO)
-    # Ajustamos el tamaño: Que sea grande pero deje aire
-    padding_y = 20
-    circle_size = h - (padding_y * 2) 
+    # 2. Icono de Línea (CÍRCULO GIGANTE)
+    # Margen izquierdo de 30px
+    padding = 20
+    circle_dim = h - (padding * 2) # Casi toda la altura de la tarjeta
     
+    cx = x + 30 + (circle_dim // 2)
     cy = y + (h // 2)
-    cx = x + 40 + (circle_size // 2) # Margen izquierdo fijo de 40px + radio
     
-    x1, y1 = cx - (circle_size//2), cy - (circle_size//2)
-    x2, y2 = cx + (circle_size//2), cy + (circle_size//2)
+    x1, y1 = cx - (circle_dim//2), cy - (circle_dim//2)
+    x2, y2 = cx + (circle_dim//2), cy + (circle_dim//2)
     
     draw.ellipse([x1, y1, x2, y2], fill=color_linea)
     
-    # 3. Texto del Número de Línea (VISIBILIDAD EXTREMA)
+    # 3. Texto del Número de Línea (ENORME)
     texto_num = linea.replace("L", "")
     color_num = "black" if texto_num in LINEAS_CLARAS else "white"
     
-    # Centrado matemático
     bbox = f_linea.getbbox(texto_num)
-    tw = bbox[2] - bbox[0]
-    th = bbox[3] - bbox[1]
+    tw, th = bbox[2]-bbox[0], bbox[3]-bbox[1]
     
-    # Ajuste vertical fino (las fuentes suelen tener baseline variable)
-    offset_y = 8 if texto_num in ["A", "B", "12"] else 5
-    tx = cx - (tw / 2)
-    ty = cy - (th / 2) - offset_y
+    # Ajuste vertical
+    offset_y = 15 if texto_num in ["A", "B", "12"] else 10
+    tx, ty = cx - (tw/2), cy - (th/2) - offset_y
     
     draw.text((tx, ty), texto_num, font=f_linea, fill=color_num)
     
-    # 4. Texto de Estado
-    text_x = x2 + 40 # Espacio generoso después del círculo
-    text_y = cy - 20 # Centrado vertical visual
+    # 4. Texto de Estado (GIGANTE Y LEGIBLE)
+    # Empieza después del círculo
+    text_x = x2 + 50 
+    
+    # Centrado vertical
+    bbox_st = f_estado.getbbox("Tg") # Altura de referencia
+    th_st = bbox_st[3] - bbox_st[1]
+    text_y = cy - (th_st / 2) - 5
     
     color_status = COLORES["ALERT_TEXT"] if es_alerta else COLORES["OK_TEXT"]
-    # Truncar texto si es muy largo
-    estado_fmt = estado.upper() if len(estado) < 13 else estado[:13] + "."
+    estado_fmt = estado.upper()
+    
+    # Si es muy largo, reducimos un poco el texto pero mantenemos tamaño de fuente
+    if len(estado_fmt) > 13: estado_fmt = estado_fmt[:13] + "."
     
     draw.text((text_x, text_y), estado_fmt, font=f_estado, fill=color_status)
 
 def generar_tablero_visual(afectaciones):
-    """Genera dashboard 2X para nitidez extrema - CORREGIDO"""
-    # Dimensiones AUMENTADAS para evitar cortes
-    # Antes H=1100 (muy poco), Ahora H=1400 (suficiente para 6 filas)
+    """Genera dashboard HD 2X"""
+    # Dimensiones 1600 x 1400 (Suficiente para todo)
     W, H = 1600, 1400 
     
     img = Image.new('RGB', (W, H), color=COLORES["BG"])
@@ -141,37 +149,35 @@ def generar_tablero_visual(afectaciones):
     
     fb = descargar_fuente()
     try:
-        f_title = ImageFont.truetype(fb, 75)
-        # Fuente del número optimizada para no salirse del círculo
-        f_line = ImageFont.truetype(fb, 80) 
-        f_status = ImageFont.truetype(fb, 42)
-        f_sub = ImageFont.truetype(fb, 32)
+        # --- FUENTES JUMBO ---
+        f_title = ImageFont.truetype(fb, 80)  # Título enorme
+        f_sub = ImageFont.truetype(fb, 40)    # Subtítulo grande
+        f_line = ImageFont.truetype(fb, 110)  # NÚMEROS MASIVOS (Antes 80)
+        f_status = ImageFont.truetype(fb, 60) # ESTADO MASIVO (Antes 42)
     except:
         f_title = f_line = f_status = f_sub = ImageFont.load_default()
 
     # Header
     now = datetime.now(pytz.timezone('America/Mexico_City'))
     draw.text((60, 60), "ESTADO DEL SERVICIO", font=f_title, fill="white")
-    draw.text((60, 150), f"Actualización: {now.strftime('%I:%M %p • %d %b')}", font=f_sub, fill=COLORES["SUBTEXT"])
+    draw.text((60, 160), f"Actualización: {now.strftime('%I:%M %p • %d %b')}", font=f_sub, fill=COLORES["SUBTEXT"])
     
-    # Línea divisoria
-    draw.line([(60, 200), (W-60, 200)], fill="#333", width=3)
+    # Línea
+    draw.line([(60, 220), (W-60, 220)], fill="#333", width=4)
 
-    # Grid Config
+    # Grid
     lineas = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "12"]
     cols = 2
     
-    # Coordenadas de inicio (debajo de la línea)
     start_x = 60
-    start_y = 240
+    start_y = 260
     
-    # Cálculos de dimensiones de tarjeta
-    gap_x = 40
-    gap_y = 30
+    gap_x = 60
+    gap_y = 40
     
-    # Ancho de tarjeta: (Ancho total - márgenes - espacio central) / 2
+    # Tarjetas más altas para acomodar texto grande
     card_w = (W - (start_x*2) - gap_x) // 2
-    card_h = 150 # Altura cómoda
+    card_h = 160 # AUMENTAMOS A 160px
 
     for i, l_key in enumerate(lineas):
         col = i % cols
@@ -186,14 +192,18 @@ def generar_tablero_visual(afectaciones):
         dibujar_tarjeta_hd(draw, x, y, card_w, card_h, l_key, estado, COLORES[l_key], f_line, f_status)
 
     # Footer
-    draw.text((W-350, H-70), "JJMex Intelligence", font=f_sub, fill=COLORES["SUBTEXT"])
+    draw.text((W-400, H-80), "JJMex Intelligence", font=f_sub, fill=COLORES["SUBTEXT"])
     
-    # 5. RESAMPLING (Reducción de calidad cinematográfica)
-    # Reducimos a la mitad exacta para máxima nitidez (800x700)
-    img_final = img.resize((800, 700), resample=Image.Resampling.LANCZOS)
+    # 5. RESAMPLING SUAVE (Reducimos menos para mantener legibilidad)
+    # Reducimos a 1280px (Ancho HD Estándar) en lugar de 800px.
+    # Esto hace que Telegram muestre la imagen más grande al abrirla.
+    factor = 1280 / W
+    new_h = int(H * factor)
+    
+    img_final = img.resize((1280, new_h), resample=Image.Resampling.LANCZOS)
     
     bio = io.BytesIO()
-    img_final.save(bio, 'PNG', quality=95)
+    img_final.save(bio, 'PNG', quality=100)
     bio.seek(0)
     return bio
 
