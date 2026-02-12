@@ -30,8 +30,7 @@ jobs:
       - name: Instalar librerías
         run: |
           python -m pip install --upgrade pip
-          # AGREGADO: beautifulsoup4 para el Modo Espía
-          pip install requests ntscraper feedparser pytz beautifulsoup4
+          pip install requests ntscraper feedparser pytz beautifulsoup4 fake-useragent
 
       - name: Ejecutar Monitor
         env:
