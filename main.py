@@ -322,7 +322,7 @@ def main():
     now = datetime.now(tz)
     print(f"🏁 Start: {now}")
     
-    enviar_texto("📡 <i>Sincronizando red...</i>")
+    enviar_texto("📡 <i>Conectando con la red de movilidad y analizando reportes ciudadanos...</i>")
     
     # Horarios
     d, h = now.weekday(), now.hour
