@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
 from urllib.parse import unquote
 
-# Desactivar advertencias de SSL
+# Desactivar advertencias de SSL para scraping agresivo
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- CONFIGURACIÓN ---
@@ -23,7 +23,8 @@ DESTINATARIOS = [id_ for id_ in [ID_GRUPO, ID_CANAL] if id_]
 
 RSS_URL = "https://news.google.com/rss/search?q=Metro+CDMX+retraso+OR+falla+OR+caos+when:1h&hl=es-419&gl=MX&ceid=MX:es-419"
 
-# Diccionario de causas para dar contexto
+# --- CEREBRO DEL BOT: DICCIONARIO DE CAUSAS ---
+# Mapea palabras clave a problemas legibles para el usuario
 CAUSAS = {
     "retraso": "Retrasos", "lento": "Marcha Lenta", "lenta": "Marcha Lenta",
     "falla": "Falla Técnica", "avería": "Avería", "desalojo": "Desalojo de Tren",
@@ -31,12 +32,13 @@ CAUSAS = {
     "zapatas": "Zapatas Pegadas", "lluvia": "Lluvia / Marcha de Seguridad", 
     "mojado": "Lluvia", "caos": "Aglomeración Alta", "colapso": "Colapso",
     "espera": "Tiempos de Espera Altos", "detenido": "Tren Detenido", 
-    "suicida": "Persona en Vías", "arrollado": "Accidente en Vías", "corte": "Corte de Corriente"
+    "suicida": "Persona en Vías", "arrollado": "Accidente en Vías", "corte": "Corte de Corriente",
+    "bloqueo": "Bloqueo exterior", "cerrada": "Estación Cerrada"
 }
 
-PALABRAS_CLAVE = list(CAUSAS.keys()) + ["afectaciones", "avance", "bloqueo", "cerradas", "servicio"]
+PALABRAS_CLAVE = list(CAUSAS.keys()) + ["afectaciones", "avance", "servicio", "estaciones"]
 PALABRAS_SOLUCION = ["restablece", "normal", "agiliza", "solucionado", "continuo", "reanuda", "opera con normalidad"]
-IGNORAR = ["buenos días", "cubrebocas", "tarjeta", "arte", "exposición", "domingos y días festivos", "cultura", "museo"]
+IGNORAR = ["buenos días", "cubrebocas", "tarjeta", "arte", "exposición", "domingos y días festivos", "cultura", "museo", "simulacro"]
 
 FIRMA = "\n\n— 🤖 <i>JJMex Bot</i>"
 
@@ -61,7 +63,6 @@ def get_headers():
     return {
         'User-Agent': ua.random,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
         'Referer': 'https://news.google.com/'
     }
 
@@ -83,47 +84,47 @@ def analizar_sentimiento(texto):
 
 def analizar_detalle_lineas(texto):
     """
-    Analiza el texto buscando líneas y asocia la CAUSA más cercana.
-    Retorna una lista de strings formateados: "⚠️ L3 (Verde): Marcha Lenta"
+    Analiza el texto FRASE POR FRASE para asociar líneas con sus problemas específicos.
     """
     texto = texto.lower()
-    # Dividimos por frases para no mezclar problemas de una línea con otra
+    # Dividimos por puntos o saltos de línea para aislar ideas
     frases = re.split(r'[.;\n]', texto) 
     
-    reportes_detectados = {} # Usamos dict para evitar duplicados de líneas
+    reportes_detectados = {} # Diccionario {Línea: Problema}
 
     for frase in frases:
-        if len(frase) < 10: continue # Ignorar frases muy cortas
+        if len(frase) < 10: continue 
         
         lineas_en_frase = []
-        # 1. Detectar qué líneas se mencionan en esta frase específica
+        # 1. ¿Qué líneas se mencionan en esta frase?
         for clave, nombre in MAPA_LINEAS.items():
             patrones = [f"línea {clave}", f"linea {clave}", f"l{clave} ", f"l-{clave}", f"la {clave} "]
-            if len(clave) < 3: patrones = [f"línea {clave}", f"linea {clave}", f"l-{clave}"]
+            if len(clave) < 3: patrones = [f"línea {clave}", f"linea {clave}", f"l-{clave}"] # Estricto para letras
             
             if any(p in frase for p in patrones):
                 lineas_en_frase.append(nombre)
         
-        # 2. Si hay líneas, buscar la causa en la MISMA frase
+        # 2. Si hay líneas, ¿qué problema se menciona en la MISMA frase?
         if lineas_en_frase:
             causas_encontradas = []
             for k, v in CAUSAS.items():
                 if k in frase:
                     causas_encontradas.append(v)
             
-            # Formatear el reporte
+            # Si no hay causa explícita en la frase, usamos "Posible Afectación"
             causa_str = ", ".join(list(set(causas_encontradas))) if causas_encontradas else "Posible Afectación"
             
             for linea in lineas_en_frase:
-                # Prioridad: Si ya detectamos algo grave, lo mantenemos. Si es "Posible", lo sobreescribimos.
+                # Prioridad: Si ya detectamos algo grave antes, no lo sobrescribimos con algo leve
                 if linea not in reportes_detectados or "Posible" in reportes_detectados[linea]:
                     reportes_detectados[linea] = causa_str
 
-    # Convertir a lista formateada
+    # Formateo Final
     resultado = []
     if reportes_detectados:
         items_ordenados = sorted(reportes_detectados.items())
         for nombre, problema in items_ordenados:
+            # Emoji de advertencia para resaltar
             resultado.append(f"⚠️ <b>{nombre}:</b> {problema}")
             
     return "\n".join(resultado) if resultado else ""
@@ -133,8 +134,10 @@ def resolver_redireccion_google(url_inicial, fuente_nombre=""):
         session = requests.Session()
         response = session.get(url_inicial, headers=get_headers(), timeout=15, allow_redirects=True, verify=False)
         
+        # Filtro nuclear de dominios basura (Actualizado con lo visto en tus logs)
         basura = ["google", "gstatic", "youtube", "blogger", "analytics", "doubleclick", 
-                  "facebook", "twitter", "instagram", "cloudflare", "w3.org", "schema.org", "googletagmanager"]
+                  "facebook", "twitter", "instagram", "cloudflare", "w3.org", "schema.org", 
+                  "googletagmanager", "g.co"]
         
         if "google" in response.url:
             print(f"   ⚠️ URL Ofuscada. Buscando fuente: '{fuente_nombre}'...")
@@ -142,15 +145,19 @@ def resolver_redireccion_google(url_inicial, fuente_nombre=""):
             if len(fuente_clean) < 3: fuente_clean = "xyz_no_match"
             
             raw_urls = re.findall(r'(https?:\/\/[^"\s<>\\]+)', response.text)
+            
             candidato_fuente = None
             candidato_generico = None
             
             for raw_url in raw_urls:
+                # Decodificar URL
                 url = unquote(raw_url).replace("\\u0026", "&").replace("\\", "")
+                
                 if any(b in url for b in basura): continue
                 if len(url) < 25: continue
-                if url.endswith(('.png', '.jpg', '.css', '.js', '.ico', '.woff')): continue
+                if url.endswith(('.png', '.jpg', '.css', '.js', '.ico', '.woff', '.svg')): continue
                 
+                # Match de fuente
                 if fuente_clean in url.lower():
                     candidato_fuente = url
                     break
@@ -169,7 +176,7 @@ def espiar_noticia_completa(url, fuente_nombre=""):
             print(f"   ↳ Leyendo sitio real: {response.url[:50]}...")
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # JSON-LD (Prioridad Alta)
+            # ESTRATEGIA JSON-LD (Infalible)
             scripts = soup.find_all('script', type='application/ld+json')
             for script in scripts:
                 if script.string:
@@ -179,9 +186,10 @@ def espiar_noticia_completa(url, fuente_nombre=""):
                         if 'articleBody' in data: return data['articleBody']
                     except: continue
 
-            # Scraping HTML
+            # ESTRATEGIA HTML
             for tag in soup(["script", "style", "nav", "footer", "header", "aside", "iframe", "form", "noscript", "ads"]):
                 tag.extract()
+            # Leemos también Listas (li) importante para enumeraciones de líneas
             textos = soup.find_all(['p', 'h1', 'h2', 'h3', 'li', 'article'])
             textos_limpios = [t.get_text().strip() for t in textos if len(t.get_text().strip()) > 20]
             return " ".join(textos_limpios)
@@ -202,36 +210,31 @@ def revisar_incidentes(ahora):
                 f = datetime(*e.published_parsed[:6], tzinfo=pytz.utc).astimezone(ahora.tzinfo)
                 if f > limite:
                     titulo = e.title
-                    # IMPORTANTE: Usamos el resumen del RSS también, no solo el título
+                    # TRUCO: Usamos el resumen del RSS + Título como primera fuente
                     resumen = e.summary if hasattr(e, 'summary') else ""
                     fuente = e.source.title if hasattr(e, 'source') else ""
                     
-                    texto_analisis = f"{titulo} {resumen}"
+                    texto_analisis = f"{titulo}. {resumen}" # Unimos con punto para que el analizador de frases funcione
                     
                     if any(p in texto_analisis.lower() for p in PALABRAS_CLAVE):
                         print(f"👉 Analizando ({fuente}): {titulo[:30]}...")
                         
-                        # 1. Intentar detectar con Título + Resumen (Rápido)
+                        # FASE 1: Análisis Rápido (Título + Resumen)
                         info_lineas = analizar_detalle_lineas(texto_analisis)
                         
-                        # 2. Si no es suficiente, Espiar Web (Profundo)
+                        # FASE 2: Escaneo Profundo (Solo si la fase 1 no dio detalles)
                         if not info_lineas:
                             print("   🕵️ Activando escaneo profundo...")
                             texto_web = espiar_noticia_completa(e.link, fuente)
-                            # Analizamos TODO junto: Título + Resumen + Web
+                            # Analizamos TODO junto
                             info_lineas = analizar_detalle_lineas(texto_analisis + " " + texto_web)
                             
-                        if info_lineas:
-                            print(f"   ✅ Detectado: {info_lineas}")
-                        else:
-                            print("   ❌ No se detectaron líneas específicas.")
-
                         emoji_estado = analizar_sentimiento(titulo)
                         
-                        # Construcción del Mensaje Rico en Datos
+                        # Construcción del Mensaje
                         cuerpo = f"{emoji_estado} <b>REPORTE:</b> {titulo}\n"
                         if info_lineas:
-                            cuerpo += f"\n{info_lineas}\n" # Aquí insertamos el detalle: "L3: Humo"
+                            cuerpo += f"\n{info_lineas}\n" # Insertamos el detalle rico
                         
                         cuerpo += f"🔗 <a href='{e.link}'>Ver Nota Completa</a>"
                         incidentes.append(cuerpo)
