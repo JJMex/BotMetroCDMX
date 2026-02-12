@@ -40,7 +40,7 @@ CAUSAS = {
 PALABRAS_CLAVE = list(CAUSAS.keys()) + ["afectaciones", "avance", "servicio", "estaciones"]
 PALABRAS_SOLUCION = ["restablece", "normal", "agiliza", "solucionado", "continuo", "reanuda", "opera con normalidad"]
 IGNORAR = ["buenos días", "cubrebocas", "tarjeta", "arte", "exposición", "domingos y días festivos", "cultura", "museo", "simulacro"]
-FIRMA = "\n\n— 🤖 <i>JJMex Bot</i>"
+FIRMA = "\n\n— 🚇 <i>JJMex Bot</i>"
 
 # --- MAPA DE LINEAS CON EMOJIS DE COLOR ---
 MAPA_LINEAS = {
