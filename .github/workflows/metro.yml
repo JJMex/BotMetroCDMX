@@ -22,7 +22,6 @@ jobs:
       - name: Instalar librerías
         run: |
           python -m pip install --upgrade pip
-          # Eliminamos Pillow, dejamos solo lo esencial para datos
           pip install requests ntscraper feedparser pytz beautifulsoup4 fake-useragent
 
       - name: Ejecutar Monitor
