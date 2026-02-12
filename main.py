@@ -4,11 +4,15 @@ import requests
 import feedparser
 import pytz
 import re
-import base64
+import urllib3
 from datetime import datetime, timedelta
 from ntscraper import Nitter
 from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
+from urllib.parse import unquote
+
+# Desactivar advertencias de SSL (necesario para modo agresivo)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- CONFIGURACIÓN ---
 TOKEN = os.environ.get('TELEGRAM_TOKEN')
@@ -16,13 +20,10 @@ ID_GRUPO = os.environ.get('TELEGRAM_CHAT_ID')
 ID_CANAL = os.environ.get('TELEGRAM_CHANNEL_ID') 
 DESTINATARIOS = [id_ for id_ in [ID_GRUPO, ID_CANAL] if id_]
 
-# URL RSS (Ventana de 1 hora para frescura)
 RSS_URL = "https://news.google.com/rss/search?q=Metro+CDMX+retraso+OR+falla+OR+caos+when:1h&hl=es-419&gl=MX&ceid=MX:es-419"
 
-# Palabras Clave de Problemas
-PALABRAS_CLAVE = ["retraso", "marcha lenta", "falla", "desalojo", "humo", "detenido", "caos", "lento", "espera", "sin servicio", "colapso", "afectaciones", "avance", "bloqueo"]
-# Palabras de Solución (Para cambiar el semáforo)
-PALABRAS_SOLUCION = ["restablece", "normal", "agiliza", "solucionado", "continuo", "reanuda"]
+PALABRAS_CLAVE = ["retraso", "marcha lenta", "falla", "desalojo", "humo", "detenido", "caos", "lento", "espera", "sin servicio", "colapso", "afectaciones", "avance", "bloqueo", "estaciones", "cerradas"]
+PALABRAS_SOLUCION = ["restablece", "normal", "agiliza", "solucionado", "continuo", "reanuda", "opera con normalidad"]
 IGNORAR = ["buenos días", "cubrebocas", "tarjeta", "arte", "exposición", "domingos y días festivos", "cultura", "museo"]
 
 MAPA_LINEAS = {
@@ -40,16 +41,14 @@ MAPA_LINEAS = {
     "12": "💛 L12 (Dorada)", "doce": "💛 L12 (Dorada)", "dorada": "💛 L12 (Dorada)"
 }
 
-# Inicializador de Camuflaje
 ua = UserAgent()
 
 def get_headers():
-    """Genera una identidad falsa aleatoria para cada petición."""
     return {
         'User-Agent': ua.random,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
-        'Referer': 'https://www.google.com/'
+        'Referer': 'https://news.google.com/'
     }
 
 def enviar_telegram(mensaje):
@@ -64,18 +63,19 @@ def enviar_telegram(mensaje):
             except: time.sleep(1)
 
 def analizar_sentimiento(texto):
-    """Determina si la noticia es mala (retraso) o buena (solución)."""
     texto = texto.lower()
     if any(p in texto for p in PALABRAS_SOLUCION):
-        return "✅" # Verde: Problema resuelto
-    return "🚨" # Rojo: Alerta activa
+        return "✅" 
+    return "🚨"
 
 def detectar_lineas(texto):
     texto = texto.lower()
     detectadas = set()
     for clave, nombre in MAPA_LINEAS.items():
+        # Patrones mejorados para evitar falsos positivos
         patrones = [f"línea {clave}", f"linea {clave}", f"l{clave} ", f"l-{clave}", f"la {clave} "]
         if len(clave) < 3: patrones = [f"línea {clave}", f"linea {clave}", f"l-{clave}"]
+        
         if any(p in texto for p in patrones):
             detectadas.add(nombre)
     
@@ -84,40 +84,54 @@ def detectar_lineas(texto):
         return "\n⚠️ <b>AFECTACIÓN:</b> " + ", ".join(lista)
     return ""
 
-def resolver_redireccion_google(url_inicial):
+def resolver_redireccion_google(url_inicial, fuente_nombre=""):
     """
-    Motor de resolución de enlaces con Filtro Anti-Basura.
+    Motor Inteligente: Usa la fuente (ej. 'TV Azteca') para filtrar links correctos.
     """
     try:
         session = requests.Session()
-        # Usamos identidad falsa
-        response = session.get(url_inicial, headers=get_headers(), timeout=10, allow_redirects=True)
+        # verify=False ayuda con algunos sitios con SSL mal configurado o estricto
+        response = session.get(url_inicial, headers=get_headers(), timeout=15, allow_redirects=True, verify=False)
         
-        # LISTA NEGRA: Dominios que NO son noticias
-        basura_domains = [
-            "google", "gstatic", "youtube", "blogger", "analytics", "doubleclick", 
-            "facebook", "twitter", "instagram", "cloudflare", "w3.org", "schema.org",
-            "googletagmanager", "g.co", "goo.gl", "pinterest", "tiktok", "microsoft"
-        ]
+        # Dominios basura
+        basura = ["google", "gstatic", "youtube", "blogger", "analytics", "doubleclick", 
+                  "facebook", "twitter", "instagram", "cloudflare", "w3.org", "schema.org", "googletagmanager"]
         
-        # Si seguimos atrapados en Google, buscamos la salida
         if "google" in response.url:
-            print("   ⚠️ URL Ofuscada. Iniciando extracción quirúrgica...")
+            print(f"   ⚠️ URL Ofuscada. Buscando enlace de fuente: '{fuente_nombre}'...")
             
-            # 1. BÚSQUEDA REGEX (Busca cualquier http que no sea google)
-            urls_candidatas = re.findall(r'(https?:\/\/[^"\s<>\\]+)', response.text)
+            # Limpiamos el nombre de la fuente para buscarlo en la URL
+            # Ej: "TV Azteca" -> "azteca", "El Universal" -> "eluniversal"
+            fuente_clean = fuente_nombre.lower().replace(" ", "").replace("tv", "").replace("noticias", "")
+            if len(fuente_clean) < 3: fuente_clean = "xyz_no_match"
+
+            # Buscamos todas las URLs y las decodificamos
+            raw_urls = re.findall(r'(https?:\/\/[^"\s<>\\]+)', response.text)
             
-            mejor_candidato = None
+            candidato_fuente = None
+            candidato_generico = None
             
-            for url in urls_candidatas:
-                # Filtros de limpieza
-                if any(b in url for b in basura_domains): continue # Es basura
-                if len(url) < 25: continue # Es muy corta
-                if url.endswith(('.png', '.jpg', '.svg', '.gif', '.js', '.css')): continue # Es un archivo
+            for raw_url in raw_urls:
+                # Decodificar URL (quitar %2F, \u0026, etc)
+                url = unquote(raw_url).replace("\\u0026", "&").replace("\\", "")
                 
-                # Si pasa los filtros, es probable que sea la noticia
-                print(f"   🎯 Candidato Válido: {url[:60]}...")
-                return session.get(url, headers=get_headers(), timeout=10)
+                if any(b in url for b in basura): continue
+                if len(url) < 25: continue
+                if url.endswith(('.png', '.jpg', '.css', '.js', '.ico')): continue
+                
+                # PRIORIDAD 1: La URL contiene el nombre de la fuente
+                if fuente_clean in url.lower():
+                    print(f"   🎯 MATCH EXACTO ({fuente_clean}): {url[:60]}...")
+                    candidato_fuente = url
+                    break # Encontramos el mejor, salimos
+                
+                # PRIORIDAD 2: Cualquier URL válida (backup)
+                if not candidato_generico: candidato_generico = url
+            
+            url_final = candidato_fuente if candidato_fuente else candidato_generico
+            
+            if url_final:
+                return session.get(url_final, headers=get_headers(), timeout=15, verify=False)
 
         return response 
         
@@ -125,16 +139,16 @@ def resolver_redireccion_google(url_inicial):
         print(f"   ❌ Error resolviendo: {e}")
         return None
 
-def espiar_noticia_completa(url):
+def espiar_noticia_completa(url, fuente_nombre=""):
     try:
-        response = resolver_redireccion_google(url)
+        # Pasamos el nombre de la fuente al resolutor
+        response = resolver_redireccion_google(url, fuente_nombre)
         
         if response and response.status_code == 200:
-            print(f"   ↳ Leyendo sitio real: {response.url[:40]}...")
+            print(f"   ↳ Leyendo sitio real: {response.url[:50]}...")
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Limpieza profunda del HTML
-            for tag in soup(["script", "style", "nav", "footer", "header", "aside", "iframe", "form"]):
+            for tag in soup(["script", "style", "nav", "footer", "header", "aside", "iframe", "form", "noscript"]):
                 tag.extract()
                 
             textos = soup.find_all(['p', 'h1', 'h2', 'article'])
@@ -157,22 +171,21 @@ def revisar_incidentes(ahora):
                 f = datetime(*e.published_parsed[:6], tzinfo=pytz.utc).astimezone(ahora.tzinfo)
                 if f > limite:
                     titulo = e.title
+                    fuente = e.source.title if hasattr(e, 'source') else ""
                     
                     if any(p in titulo.lower() for p in PALABRAS_CLAVE):
-                        print(f"👉 Analizando: {titulo[:40]}...")
+                        print(f"👉 Analizando ({fuente}): {titulo[:30]}...")
                         
-                        # 1. Detectar Líneas
                         tag_linea = detectar_lineas(titulo)
                         if not tag_linea:
                             print("   🕵️ Activando escaneo profundo...")
-                            texto_web = espiar_noticia_completa(e.link)
+                            # AQUI ESTÁ LA CLAVE: Pasamos la fuente
+                            texto_web = espiar_noticia_completa(e.link, fuente)
                             tag_linea = detectar_lineas(texto_web)
                             if tag_linea: print(f"   ✅ Líneas detectadas: {tag_linea}")
                             else: print("   ❌ No se encontraron líneas.")
                         
-                        # 2. Analizar Sentimiento (Rojo o Verde)
                         emoji_estado = analizar_sentimiento(titulo)
-                        
                         incidentes.append(f"{emoji_estado} <b>REPORTE:</b> {titulo}{tag_linea}\n🔗 <a href='{e.link}'>Ver Nota</a>")
     except Exception as e: print(f"Error RSS: {e}")
 
@@ -209,9 +222,8 @@ def main():
     ahora = datetime.now(tz_mx)
     print(f"🏁 Escaneo iniciado: {ahora}")
     
-    # Ping de conexión
     enviar_telegram("📡 <i>Conectando con la red de movilidad y analizando reportes ciudadanos...</i>")
-    time.sleep(1) # Pequeña pausa
+    time.sleep(1)
     
     msg = verificar_horario_servicio(ahora)
     if msg: enviar_telegram(msg); return
@@ -222,7 +234,6 @@ def main():
         h = ahora.strftime('%I:%M %p')
         enviar_telegram(f"📢 <b>ACTUALIZACIÓN ({h})</b>\n──────────────────\n" + "\n\n".join(un))
     else:
-        # Mensaje de normalidad
         enviar_telegram("✅ <b>Estado del Metro:</b> Sin reportes críticos en la última hora.\n<i>Sistema operando con normalidad.</i>")
         print("✅ Todo normal.")
 
