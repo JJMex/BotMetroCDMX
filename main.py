@@ -12,7 +12,7 @@ TOKEN = os.environ.get('TELEGRAM_TOKEN')
 ID_GRUPO = os.environ.get('TELEGRAM_CHAT_ID') 
 ID_CANAL = os.environ.get('TELEGRAM_CHANNEL_ID') 
 
-# Lista de destinos activa
+# Lista de destinos activa (Grupo + Canal)
 DESTINATARIOS = [id_ for id_ in [ID_GRUPO, ID_CANAL] if id_]
 
 # --- CONFIGURACIÓN DE BÚSQUEDA ---
@@ -53,18 +53,18 @@ def enviar_telegram(mensaje):
 def detectar_lineas(texto):
     """
     Analiza el texto buscando patrones como 'Línea 3', 'L3', 'Linea B'.
-    Devuelve un string formateado con las líneas afectadas.
+    Devuelve un string formateado con las líneas afectadas y sus colores.
     """
     texto = texto.lower()
     detectadas = set()
     
     for clave, nombre in MAPA_LINEAS.items():
-        # Buscamos patrones específicos para evitar falsos positivos (ej: no confundir "1 min" con "Linea 1")
+        # Buscamos patrones específicos
         patrones = [
             f"línea {clave}", f"linea {clave}", 
             f"l{clave} ", f"l-{clave}", f"l {clave} "
         ]
-        # Caso especial para letras A y B para evitar coincidir con palabras normales
+        # Caso especial para letras A y B
         if clave in ['a', 'b']:
             patrones = [f"línea {clave}", f"linea {clave}", f"l-{clave}"]
 
@@ -79,11 +79,8 @@ def obtener_tweets_robusto():
     """
     Intenta obtener tweets rotando estrategias de Nitter para evitar bloqueos.
     """
-    tweets_encontrados = []
-    
-    # Lista de instancias de respaldo por si la automática falla
     instancias_backup = [
-        None, # Primero intentar automático
+        None, # Primero intentar automático (mejor opción)
         "nitter.net",
         "nitter.cz",
         "nitter.privacydev.net"
@@ -91,19 +88,18 @@ def obtener_tweets_robusto():
 
     for instancia in instancias_backup:
         try:
-            print(f"🦅 Intentando conectar a Nitter ({instancia or 'Auto'})...")
-            # skip_instance_check=False obliga a buscar una instancia viva
+            print(f"🦅 Conectando a Nitter ({instancia or 'Auto'})...")
             scraper = Nitter(log_level=1, skip_instance_check=False, instance=instancia)
             data = scraper.get_tweets("MetroCDMX", mode='user', number=8)
             
             if data and 'tweets' in data and len(data['tweets']) > 0:
-                return data['tweets'] # Éxito, retornamos los tweets
+                return data['tweets'] # Éxito
             
         except Exception as e:
             print(f"⚠️ Falló instancia {instancia}: {e}")
-            time.sleep(2) # Esperar antes de probar la siguiente
+            time.sleep(2) 
             
-    return [] # Si todo falla, retornamos lista vacía
+    return [] # Si todo falla
 
 def revisar_incidentes(ahora):
     incidentes = []
@@ -128,7 +124,6 @@ def revisar_incidentes(ahora):
         try:
             txt = t['text'].lower()
             if any(p in txt for p in PALABRAS_CLAVE) and not any(i in txt for i in IGNORAR):
-                # Filtro de tiempo: "m" (minutos) o "1h" (hace una hora)
                 if "m" in t['date'] or "1h" in t['date']:
                     tag_linea = detectar_lineas(txt)
                     incidentes.append(f"🚨 <b>AVISO OFICIAL:</b> {t['text']}{tag_linea}\n🔗 <a href='{t['link']}'>Ver Tweet</a>")
@@ -155,25 +150,28 @@ def main():
     ahora = datetime.now(tz_mx)
     print(f"🏁 JJMex Scan iniciado: {ahora}")
 
-    # 1. Turno
+    # --- 1. MENSAJE DE CONEXIÓN (RESTAURADO) ---
+    enviar_telegram("📡 <i>Conectando con la red de movilidad y analizando reportes ciudadanos...</i>")
+    time.sleep(2) # Pausa dramática para simular escaneo
+
+    # --- 2. Turno ---
     msg_turno = verificar_horario_servicio(ahora)
     if msg_turno:
         enviar_telegram(msg_turno)
         return
 
-    # 2. Incidentes
+    # --- 3. Incidentes ---
     reportes = revisar_incidentes(ahora)
     
     if reportes:
-        # Eliminar duplicados exactos
         reportes_unicos = list(dict.fromkeys(reportes))
         hora_str = ahora.strftime('%I:%M %p')
         header = f"🚨 <b>INCIDENCIAS DETECTADAS ({hora_str})</b>\n──────────────────\n"
         enviar_telegram(header + "\n\n".join(reportes_unicos))
     else:
         print("✅ Todo normal.")
-        # Opcional: Descomentar si quieres mensaje de "Todo Bien" cada hora
-        # enviar_telegram("✅ <b>Estado del Metro:</b> Sin reportes graves en la última hora.")
+        # Mensaje opcional de "Todo bien" si quisieras activarlo:
+        enviar_telegram("✅ <b>Estado del Metro:</b> Sin reportes graves en la última hora.")
 
 if __name__ == "__main__":
     main()
