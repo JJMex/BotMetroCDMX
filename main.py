@@ -5,6 +5,7 @@ import feedparser
 import pytz
 import re
 import urllib3
+import json
 from datetime import datetime, timedelta
 from ntscraper import Nitter
 from bs4 import BeautifulSoup
@@ -26,9 +27,8 @@ PALABRAS_CLAVE = ["retraso", "marcha lenta", "falla", "desalojo", "humo", "deten
 PALABRAS_SOLUCION = ["restablece", "normal", "agiliza", "solucionado", "continuo", "reanuda", "opera con normalidad"]
 IGNORAR = ["buenos días", "cubrebocas", "tarjeta", "arte", "exposición", "domingos y días festivos", "cultura", "museo"]
 
-# --- FIRMA INSTITUCIONAL ---
-# Minimalista: Salto de línea doble + Guion largo + Nombre en cursiva
-FIRMA = "\n\n<i>— 🤖 JJMex Bot</i>"
+# Firma Minimalista
+FIRMA = "\n\n— 🤖 <i>JJMex Bot</i>"
 
 MAPA_LINEAS = {
     "1": "🩷 L1 (Rosa)", "uno": "🩷 L1 (Rosa)", "rosa": "🩷 L1 (Rosa)",
@@ -76,10 +76,13 @@ def detectar_lineas(texto):
     texto = texto.lower()
     detectadas = set()
     for clave, nombre in MAPA_LINEAS.items():
+        # Patrones robustos
         patrones = [f"línea {clave}", f"linea {clave}", f"l{clave} ", f"l-{clave}", f"la {clave} "]
         if len(clave) < 3: patrones = [f"línea {clave}", f"linea {clave}", f"l-{clave}"]
+        
         if any(p in texto for p in patrones):
             detectadas.add(nombre)
+    
     if detectadas:
         lista = sorted(list(detectadas))
         return "\n⚠️ <b>AFECTACIÓN:</b> " + ", ".join(lista)
@@ -89,6 +92,7 @@ def resolver_redireccion_google(url_inicial, fuente_nombre=""):
     try:
         session = requests.Session()
         response = session.get(url_inicial, headers=get_headers(), timeout=15, allow_redirects=True, verify=False)
+        
         basura = ["google", "gstatic", "youtube", "blogger", "analytics", "doubleclick", 
                   "facebook", "twitter", "instagram", "cloudflare", "w3.org", "schema.org", "googletagmanager"]
         
@@ -96,20 +100,26 @@ def resolver_redireccion_google(url_inicial, fuente_nombre=""):
             print(f"   ⚠️ URL Ofuscada. Buscando fuente: '{fuente_nombre}'...")
             fuente_clean = fuente_nombre.lower().replace(" ", "").replace("tv", "").replace("noticias", "")
             if len(fuente_clean) < 3: fuente_clean = "xyz_no_match"
+            
+            # Extraer todas las URLs posibles
             raw_urls = re.findall(r'(https?:\/\/[^"\s<>\\]+)', response.text)
+            
             candidato_fuente = None
             candidato_generico = None
             
             for raw_url in raw_urls:
                 url = unquote(raw_url).replace("\\u0026", "&").replace("\\", "")
+                
                 if any(b in url for b in basura): continue
                 if len(url) < 25: continue
-                if url.endswith(('.png', '.jpg', '.css', '.js', '.ico')): continue
+                if url.endswith(('.png', '.jpg', '.css', '.js', '.ico', '.woff')): continue
                 
+                # Coincidencia de fuente
                 if fuente_clean in url.lower():
                     print(f"   🎯 MATCH EXACTO ({fuente_clean}): {url[:60]}...")
                     candidato_fuente = url
                     break
+                
                 if not candidato_generico: candidato_generico = url
             
             url_final = candidato_fuente if candidato_fuente else candidato_generico
@@ -123,38 +133,72 @@ def resolver_redireccion_google(url_inicial, fuente_nombre=""):
 def espiar_noticia_completa(url, fuente_nombre=""):
     try:
         response = resolver_redireccion_google(url, fuente_nombre)
+        
         if response and response.status_code == 200:
             print(f"   ↳ Leyendo sitio real: {response.url[:50]}...")
             soup = BeautifulSoup(response.text, 'html.parser')
-            for tag in soup(["script", "style", "nav", "footer", "header", "aside", "iframe", "form", "noscript"]):
+            
+            # --- ESTRATEGIA 1: JSON-LD (Datos Ocultos) ---
+            # Muchos sitios (TV Azteca, Milenio) ponen el texto limpio aquí
+            scripts = soup.find_all('script', type='application/ld+json')
+            for script in scripts:
+                if script.string:
+                    try:
+                        data = json.loads(script.string)
+                        if isinstance(data, list): data = data[0]
+                        if 'articleBody' in data:
+                            print("   ✅ Texto encontrado en JSON-LD (Alta Precisión)")
+                            return data['articleBody']
+                    except: continue
+
+            # --- ESTRATEGIA 2: HTML VISIBLE (Mejorada) ---
+            # Eliminamos ruido
+            for tag in soup(["script", "style", "nav", "footer", "header", "aside", "iframe", "form", "noscript", "ads"]):
                 tag.extract()
-            textos = soup.find_all(['p', 'h1', 'h2', 'article'])
-            texto_completo = " ".join([t.get_text() for t in textos])
-            return texto_completo
-    except: pass
+            
+            # AHORA BUSCAMOS 'li' (Listas) y 'div' (Contenedores) además de párrafos
+            # TV Azteca suele poner las líneas afectadas en <li>
+            textos = soup.find_all(['p', 'h1', 'h2', 'h3', 'li', 'article'])
+            
+            # Filtramos textos muy cortos para no leer menús
+            textos_limpios = []
+            for t in textos:
+                txt = t.get_text().strip()
+                if len(txt) > 20: textos_limpios.append(txt)
+                
+            return " ".join(textos_limpios)
+
+    except Exception as e: 
+        print(f"   ⚠️ Error de lectura: {e}")
     return ""
 
 def revisar_incidentes(ahora):
     incidentes = []
+    
     # --- GOOGLE NEWS ---
     try:
         print("🔎 Analizando Noticias...")
         feed = feedparser.parse(RSS_URL)
         limite = ahora - timedelta(minutes=65)
+        
         for e in feed.entries:
             if hasattr(e, 'published_parsed'):
                 f = datetime(*e.published_parsed[:6], tzinfo=pytz.utc).astimezone(ahora.tzinfo)
                 if f > limite:
                     titulo = e.title
                     fuente = e.source.title if hasattr(e, 'source') else ""
+                    
                     if any(p in titulo.lower() for p in PALABRAS_CLAVE):
                         print(f"👉 Analizando ({fuente}): {titulo[:30]}...")
+                        
                         tag_linea = detectar_lineas(titulo)
                         if not tag_linea:
                             print("   🕵️ Activando escaneo profundo...")
                             texto_web = espiar_noticia_completa(e.link, fuente)
                             tag_linea = detectar_lineas(texto_web)
                             if tag_linea: print(f"   ✅ Líneas detectadas: {tag_linea}")
+                            else: print("   ❌ No se encontraron líneas en el cuerpo.")
+                        
                         emoji_estado = analizar_sentimiento(titulo)
                         incidentes.append(f"{emoji_estado} <b>REPORTE:</b> {titulo}{tag_linea}\n🔗 <a href='{e.link}'>Ver Nota</a>")
     except Exception as e: print(f"Error RSS: {e}")
@@ -176,6 +220,7 @@ def revisar_incidentes(ahora):
                              incidentes.append(f"{emoji_estado} <b>AVISO OFICIAL:</b> {t['text']}{tag_linea}\n🔗 <a href='{t['link']}'>Ver Tweet</a>")
                 break 
         except: continue
+
     return incidentes
 
 def verificar_horario_servicio(ahora):
@@ -194,7 +239,6 @@ def main():
     enviar_telegram("📡 <i>Conectando con la red de movilidad y analizando reportes ciudadanos...</i>")
     time.sleep(1)
     
-    # Reporte de Horario (+ Firma)
     msg = verificar_horario_servicio(ahora)
     if msg: enviar_telegram(msg + FIRMA); return
 
@@ -202,10 +246,9 @@ def main():
     if reportes:
         un = list(dict.fromkeys(reportes))
         h = ahora.strftime('%I:%M %p')
-        # Reporte de Incidentes (+ Firma)
         enviar_telegram(f"📢 <b>ACTUALIZACIÓN ({h})</b>\n──────────────────\n" + "\n\n".join(un) + FIRMA)
     else:
-        # Reporte Normal (+ Firma)
+        # Mensaje de normalidad con Firma Minimalista
         enviar_telegram("✅ <b>Estado del Metro:</b> Sin reportes críticos en la última hora.\n<i>Sistema operando con normalidad.</i>" + FIRMA)
         print("✅ Todo normal.")
 
