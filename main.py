@@ -68,13 +68,14 @@ def get_headers():
 def enviar_telegram(mensaje):
     if not TOKEN or not DESTINATARIOS: return
     for chat_id in DESTINATARIOS:
-        for _ in range(3):
+        for _ in range(3): # Reintentos
             try:
                 url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
                 data = {'chat_id': chat_id, 'text': mensaje, 'parse_mode': 'HTML', 'disable_web_page_preview': True}
                 requests.post(url, data=data, timeout=10)
                 break
-            except: pass
+            except Exception as e:
+                time.sleep(1)
 
 # --- CEREBRO DE ANÁLISIS ---
 
@@ -86,7 +87,6 @@ def resolver_redireccion_google(url, fuente=""):
         basura = ["google", "gstatic", "youtube", "analytics", "doubleclick", "facebook", "twitter", "googletagmanager", "scorecardresearch"]
         
         if "google" in r.url:
-            print(f"   ⚠️ URL Ofuscada. Fuente esperada: '{fuente}'")
             clean = fuente.lower().replace(" ", "").replace("tv", "").replace("noticias", "").replace("diario","")
             if len(clean) < 3: clean = "xxxxx"
 
@@ -102,7 +102,6 @@ def resolver_redireccion_google(url, fuente=""):
                 if u.endswith(('.png','.jpg','.js','.css','.woff')): continue
 
                 if clean in u.lower():
-                    print(f"   🎯 MATCH DE FUENTE: {u[:50]}...")
                     return session.get(u, headers=get_headers(), timeout=10, verify=False)
                 
                 if not generic_match: generic_match = u
@@ -119,6 +118,7 @@ def espiar_web(url, fuente=""):
         if resp and resp.status_code == 200:
             soup = BeautifulSoup(resp.text, 'html.parser')
             
+            # JSON-LD
             for s in soup.find_all('script', type='application/ld+json'):
                 if s.string:
                     try:
@@ -127,6 +127,7 @@ def espiar_web(url, fuente=""):
                         if 'articleBody' in d: return d['articleBody']
                     except: continue
             
+            # HTML Cleaning
             for t in soup(["script", "style", "nav", "footer", "header", "ads", "iframe", "aside", "form"]): t.extract()
             textos = [t.get_text().strip() for t in soup.find_all(['p','li','h1','h2','h3']) if len(t.get_text().strip()) > 25]
             return " ".join(textos)
@@ -156,7 +157,6 @@ def detectar_problemas_detallados(texto):
     
     if reportes:
         items = sorted(reportes.items())
-        # Ahora el reporte incluirá el emoji automáticamente
         return "\n".join([f"⚠️ <b>{k}:</b> {v}" for k, v in items])
     return ""
 
@@ -193,10 +193,19 @@ def revisar_todo(ahora):
                         msgs.append(cuerpo)
     except Exception as ex: print(f"RSS Error: {ex}")
 
-    # --- 2. TWITTER ---
-    for inst in ["nitter.privacydev.net", "nitter.net"]:
+    # --- 2. TWITTER (NITTER) ---
+    # LISTA AMPLIADA (MEJORA #2)
+    nitter_instances = [
+        "nitter.privacydev.net", 
+        "nitter.net", 
+        "nitter.cz", 
+        "nitter.perennialteks.com", 
+        "nitter.freedit.eu"
+    ]
+    
+    for inst in nitter_instances:
         try:
-            print(f"🦅 Escaneando Twitter ({inst})...")
+            print(f"🦅 Probando Twitter en {inst}...")
             scraper = Nitter(log_level=1, skip_instance_check=False, instance=inst)
             tweets = scraper.get_tweets("MetroCDMX", mode='user', number=4)
             if tweets and 'tweets' in tweets:
@@ -211,7 +220,7 @@ def revisar_todo(ahora):
                             if detalles: cuerpo += f"\n{detalles}\n"
                             cuerpo += f"🔗 <a href='{t['link']}'>Ver Tweet</a>"
                             msgs.append(cuerpo)
-                break
+                break 
         except: continue
 
     return msgs
@@ -221,11 +230,14 @@ def main():
     now = datetime.now(tz)
     print(f"🏁 Inicio: {now}")
     
+    # MANTENIDO: Mensaje de conexión
     enviar_telegram("📡 <i>Conectando con la red de movilidad y analizando reportes ciudadanos...</i>")
     
     d, h = now.weekday(), now.hour
     msg_h = None
     if d<=4 and h==5: msg_h = "🚇 <b>APERTURA DE SERVICIO</b>\n──────────────────\nInicia operaciones día hábil."
+    elif d==5 and h==6: msg_h = "🚇 <b>APERTURA SÁBADO</b>\n──────────────────\nInicia servicio de fin de semana."
+    elif d==6 and h==7: msg_h = "🚇 <b>APERTURA DOMINGO</b>\n──────────────────\nInicia servicio dominical."
     elif h==0: msg_h = "💤 <b>CIERRE DE SERVICIO</b>\n──────────────────\nBuenas noches."
     
     if msg_h: enviar_telegram(msg_h + FIRMA); return
@@ -239,7 +251,8 @@ def main():
         enviar_telegram(full_msg)
     else:
         print("✅ Sin novedades")
-        enviar_telegram("✅ <b>Sistema operando con normalidad.</b>" + FIRMA)
+        # MANTENIDO: Mensaje de confirmación cuando no hay fallas
+        enviar_telegram("✅ <b>Sistema operando con normalidad.</b>\nSin reportes críticos en la última hora." + FIRMA)
 
 if __name__ == "__main__":
     main()
