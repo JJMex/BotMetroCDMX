@@ -314,7 +314,7 @@ def main():
     print(f"🏁 JJMex Scan: {ahora}")
 
     # Ping técnico (solo texto)
-    enviar_telegram_texto("📡 <i>Analizando red...</i>")
+    enviar_telegram_texto("📡 <i>Conectando con la red de movilidad y analizando reportes ciudadanos...</i>")
     
     # 1. Horario
     msg_h = verificar_horario(ahora)
