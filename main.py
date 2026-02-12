@@ -250,7 +250,7 @@ def main():
     now = datetime.now(tz)
     print(f"🏁 Inicio de Escaneo: {now}")
     
-    enviar_telegram("📡 <i>Conectando con la red de movilidad...</i>")
+    enviar_telegram("📡 <i>Conectando con la red de movilidad y analizando reportes ciudadanos...</i>")
     
     # Horarios de Servicio
     d, h = now.weekday(), now.hour
