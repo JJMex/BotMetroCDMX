@@ -82,16 +82,34 @@ def descargar_fuente():
 def dibujar_tarjeta(draw, x, y, w, h, linea, estado, color_linea, font_l, font_s):
     # Fondo tarjeta
     color_borde = COLORES["ALERT"] if estado != "Normal" else COLORES["CARD"]
-    bg_card = "#2C333D" if estado == "Normal" else "#381E1E" # Fondo rojizo si hay falla
+    bg_card = "#2C333D" if estado == "Normal" else "#381E1E"
     
     draw.rounded_rectangle([x, y, x+w, y+h], radius=12, fill=bg_card, outline=color_borde, width=2 if estado != "Normal" else 0)
     
-    # Pill de la Línea (Círculo/Elipse)
-    draw.ellipse([x+10, y+10, x+45, y+45], fill=color_linea)
+    # --- MEJORA DE NITIDEZ AQUÍ ---
+    # Coordenadas del círculo
+    cx1, cy1 = x+10, y+10
+    cx2, cy2 = x+45, y+45
+    draw.ellipse([cx1, cy1, cx2, cy2], fill=color_linea)
     
-    # Texto Línea (Centrado manualmente)
-    offset_x = 10 if len(linea) > 2 else 13
-    draw.text((x+offset_x, y+12), linea.replace("L",""), font=font_l, fill="white")
+    # Texto a dibujar (quitamos la L para que sea solo el número/letra)
+    txt_num = linea.replace("L","")
+    
+    # Cálculo de Centro Exacto
+    center_x = (cx1 + cx2) / 2
+    center_y = (cy1 + cy2) / 2
+    
+    # Obtener dimensiones exactas del texto para centrarlo
+    bbox = font_l.getbbox(txt_num)
+    txt_w = bbox[2] - bbox[0]
+    txt_h = bbox[3] - bbox[1]
+    
+    txt_x = center_x - (txt_w / 2)
+    txt_y = center_y - (txt_h / 2) - 2 # Pequeño ajuste visual hacia arriba
+
+    # Dibujar texto con CONTORNO NEGRO (Stroke) para máxima nitidez
+    draw.text((txt_x, txt_y), txt_num, font=font_l, fill="white", stroke_width=2, stroke_fill="black")
+    # ---------------------------------
     
     # Texto Estado
     color_status = COLORES["OK"] if estado == "Normal" else COLORES["ALERT"]
@@ -99,14 +117,15 @@ def dibujar_tarjeta(draw, x, y, w, h, linea, estado, color_linea, font_l, font_s
 
 def generar_tablero_visual(afectaciones):
     """Genera un dashboard tipo App Móvil"""
-    W, H = 800, 500 # Más compacto
+    W, H = 800, 500
     img = Image.new('RGB', (W, H), color=COLORES["BG"])
     draw = ImageDraw.Draw(img)
     
     fb = descargar_fuente()
     try:
         f_title = ImageFont.truetype(fb, 36)
-        f_line = ImageFont.truetype(fb, 22)
+        # AUMENTAMOS TAMAÑO DE FUENTE DE LÍNEA (De 22 a 24)
+        f_line = ImageFont.truetype(fb, 24) 
         f_status = ImageFont.truetype(fb, 18)
         f_sub = ImageFont.truetype(fb, 14)
     except:
@@ -117,23 +136,20 @@ def generar_tablero_visual(afectaciones):
     draw.text((30, 25), "ESTADO DEL SERVICIO", font=f_title, fill="white")
     draw.text((30, 70), f"Última actualización: {now.strftime('%I:%M %p • %d %b')}", font=f_sub, fill=COLORES["SUBTEXT"])
     
-    # Línea divisoria
     draw.line([(30, 95), (770, 95)], fill=COLORES["CARD"], width=2)
 
-    # Grid (2 Columnas x 6 Filas) para mejor lectura móvil
+    # Grid (2 Columnas x 6 Filas)
     lineas = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "12"]
     start_x, start_y = 30, 115
     col_w, row_h = 360, 55
     gap_x, gap_y = 20, 10
 
     for i, l_key in enumerate(lineas):
-        # Lógica de posición
         col = i % 2
         row = i // 2
         x = start_x + (col * (col_w + gap_x))
         y = start_y + (row * (row_h + gap_y))
         
-        # Datos
         l_name = f"L{l_key}"
         estado = afectaciones.get(l_name, "Normal")
         
@@ -143,7 +159,7 @@ def generar_tablero_visual(afectaciones):
     draw.text((W-150, H-30), "JJMex Intelligence", font=f_sub, fill=COLORES["SUBTEXT"])
     
     bio = io.BytesIO()
-    img.save(bio, 'PNG')
+    img.save(bio, 'PNG', quality=95) # Calidad máxima
     bio.seek(0)
     return bio
 
@@ -174,20 +190,14 @@ def enviar_texto(texto):
 
 # --- CEREBRO DE ANÁLISIS ---
 def resolver_redireccion_google(url, fuente=""):
-    """
-    ELITE FIX: Prioriza URLs que contengan el nombre de la fuente.
-    Evita caer en trampas de analytics.
-    """
     try:
         session = requests.Session()
         r = session.get(url, headers=get_headers(), timeout=10, verify=False, allow_redirects=True)
         
-        # Lista negra ampliada
         basura = ["google", "gstatic", "youtube", "analytics", "doubleclick", "facebook", "twitter", "googletagmanager", "scorecardresearch"]
         
         if "google" in r.url:
             print(f"   ⚠️ URL Ofuscada. Fuente esperada: '{fuente}'")
-            # Normalizar nombre fuente (ej: "TV Azteca" -> "azteca")
             fuente_clean = fuente.lower().replace(" ", "").replace("tv", "").replace("noticias", "").replace("diario","")
             if len(fuente_clean) < 3: fuente_clean = "xxxxx"
 
@@ -201,14 +211,12 @@ def resolver_redireccion_google(url, fuente=""):
                 if any(b in u for b in basura) or len(u) < 25: continue
                 if u.endswith(('.png','.jpg','.js','.css','.woff')): continue
 
-                # EL FILTRO DE ORO:
                 if fuente_clean in u.lower():
                     print(f"   🎯 MATCH DE FUENTE: {u[:50]}...")
                     return session.get(u, headers=get_headers(), timeout=10, verify=False)
                 
                 if not generic_match: generic_match = u
             
-            # Si no hay match de fuente, usamos el genérico (pero es arriesgado)
             target = best_match or generic_match
             if target: return session.get(target, headers=get_headers(), timeout=10, verify=False)
             
@@ -220,7 +228,6 @@ def espiar_web(url, fuente=""):
         resp = resolver_redireccion_google(url, fuente)
         if resp and resp.status_code == 200:
             soup = BeautifulSoup(resp.text, 'html.parser')
-            # 1. JSON-LD (La forma más limpia)
             for s in soup.find_all('script', type='application/ld+json'):
                 if s.string:
                     try:
@@ -229,36 +236,31 @@ def espiar_web(url, fuente=""):
                         if 'articleBody' in d: return d['articleBody']
                     except: continue
             
-            # 2. HTML Limpieza profunda
             for t in soup(["script", "style", "nav", "footer", "header", "ads", "iframe", "aside", "form"]): t.extract()
-            # Buscar en listas (li) y párrafos (p)
             textos = [t.get_text().strip() for t in soup.find_all(['p','li','h1','h2','h3']) if len(t.get_text().strip()) > 25]
             return " ".join(textos)
     except: pass
     return ""
 
 def detectar_problemas(texto):
-    """Devuelve {'L3': 'Retraso', 'L1': 'Lluvia'}"""
     texto = texto.lower()
-    frases = re.split(r'[.;\n|]', texto) # Dividir mejor
+    frases = re.split(r'[.;\n|]', texto)
     res = {}
     
     for f in frases:
         if len(f) < 10: continue
         lineas = []
         for k, v in MAPA_LINEAS.items():
-            # Regex simple para evitar falsos positivos (ej: 'uno' en 'alguno')
             if re.search(fr'\b{k}\b' if k.isdigit() else k, f):
                 lineas.append(v)
             elif f"linea {k}" in f or f"l{k} " in f:
                 lineas.append(v)
         
         if lineas:
-            # Buscar causa en esa misma frase
             found_causes = [val for key, val in CAUSAS.items() if key in f]
             cause_txt = ", ".join(list(set(found_causes))) if found_causes else "Afectación"
             
-            for l in set(lineas): # Usar set para únicos
+            for l in set(lineas):
                 if l not in res or "Afectación" in res[l]:
                     res[l] = cause_txt
     return res
@@ -277,7 +279,6 @@ def revisar_todo(ahora):
             if hasattr(e,'published_parsed'):
                 dt = datetime(*e.published_parsed[:6], tzinfo=pytz.utc).astimezone(ahora.tzinfo)
                 if dt > limite:
-                    # Análisis Escalonado
                     txt_base = f"{e.title}. {e.summary if hasattr(e,'summary') else ''}"
                     fuente = e.source.title if hasattr(e,'source') else ""
                     
@@ -285,7 +286,6 @@ def revisar_todo(ahora):
                         print(f"👉 Detectado: {e.title[:30]}")
                         probs = detectar_problemas(txt_base)
                         
-                        # Si no hay detalle, vamos profundo
                         if not probs:
                             print("   🕵️ Deep Scan activado...")
                             web_content = espiar_web(e.link, fuente)
@@ -298,7 +298,7 @@ def revisar_todo(ahora):
                             msgs.append(f"{emoji} <b>NOTICIA:</b> {e.title}\n{detalles}\n🔗 <a href='{e.link}'>Leer Nota</a>")
     except Exception as ex: print(f"RSS Error: {ex}")
 
-    # 2. NITTER (Respaldo)
+    # 2. NITTER
     for inst in ["nitter.privacydev.net", "nitter.net"]:
         try:
             print(f"🦅 Twitter Scan ({inst})...")
@@ -338,7 +338,6 @@ def main():
         print(f"🎨 Pintando dashboard: {fallas}")
         img = generar_tablero_visual(fallas)
         
-        # Eliminar duplicados y armar caption
         uniques = list(dict.fromkeys(textos))
         caption = f"📢 <b>REPORTE ({now.strftime('%I:%M %p')})</b>\n──────────────────\n" + "\n\n".join(uniques) + FIRMA
         
