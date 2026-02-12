@@ -14,12 +14,10 @@ ID_GRUPO = os.environ.get('TELEGRAM_CHAT_ID')
 ID_CANAL = os.environ.get('TELEGRAM_CHANNEL_ID') 
 DESTINATARIOS = [id_ for id_ in [ID_GRUPO, ID_CANAL] if id_]
 
-# URL de búsqueda
 RSS_URL = "https://news.google.com/rss/search?q=Metro+CDMX+retraso+OR+falla+OR+caos+when:1h&hl=es-419&gl=MX&ceid=MX:es-419"
 PALABRAS_CLAVE = ["retraso", "marcha lenta", "falla", "desalojo", "humo", "detenido", "caos", "lento", "espera", "sin servicio", "colapso", "afectaciones", "avance"]
 IGNORAR = ["buenos días", "cubrebocas", "tarjeta", "arte", "exposición", "domingos y días festivos", "cultura"]
 
-# --- DICCIONARIO DE LÍNEAS ---
 MAPA_LINEAS = {
     "1": "🩷 Línea 1 (Rosa)", "uno": "🩷 Línea 1 (Rosa)", "rosa": "🩷 Línea 1 (Rosa)",
     "2": "💙 Línea 2 (Azul)", "dos": "💙 Línea 2 (Azul)", "azul": "💙 Línea 2 (Azul)",
@@ -47,7 +45,6 @@ def enviar_telegram(mensaje):
             except: time.sleep(1)
 
 def detectar_lineas(texto):
-    """Analiza texto buscando nombres, números o COLORES."""
     texto = texto.lower()
     detectadas = set()
     for clave, nombre in MAPA_LINEAS.items():
@@ -61,8 +58,7 @@ def detectar_lineas(texto):
 
 def resolver_redireccion_google(url_inicial):
     """
-    Técnica Avanzada: Busca la URL real oculta en el texto/HTML usando Regex,
-    ya que Google la esconde dentro de variables de Javascript.
+    Mejorado: Filtra imágenes y URLs de Google para encontrar la noticia real.
     """
     try:
         session = requests.Session()
@@ -72,24 +68,28 @@ def resolver_redireccion_google(url_inicial):
         
         response = session.get(url_inicial, headers=headers, timeout=10, allow_redirects=True)
         
-        # Si seguimos en Google, aplicamos Regex Hunter
+        # DOMINIOS BASURA A IGNORAR
+        ignorar_dominios = [
+            "googleusercontent.com", "gstatic.com", "w3.org", "schema.org", 
+            "googletagmanager.com", "google.com", "youtube.com", "blogger.com"
+        ]
+        
         if "news.google.com" in response.url:
-            print("   ⚠️ Detectada ofuscación de Google. Escaneando código fuente...")
-            
-            # 1. Buscamos URLs que NO sean de google dentro del HTML
-            # Este patrón busca http/https seguido de caracteres válidos
+            print("   ⚠️ Atrapado en Google. Filtrando URLs basura...")
             texto_html = response.text
             
-            # Patrón: Busca cualquier URL que empiece con http pero que NO tenga "google" justo después
-            urls_encontradas = re.findall(r'(https?:\/\/(?!news\.google\.com|www\.google\.com)[^"\s<>\\]+)', texto_html)
+            # Buscamos TODAS las URLs posibles
+            urls_encontradas = re.findall(r'(https?:\/\/[^"\s<>\\]+)', texto_html)
             
-            if urls_encontradas:
-                # Tomamos la primera URL larga que parezca una noticia real
-                for url_candidata in urls_encontradas:
-                    if len(url_candidata) > 20: # Evitar iconos o scripts cortos
-                        print(f"   🎯 URL Real decodificada: {url_candidata}")
-                        # Hacemos la petición a la web real
-                        return session.get(url_candidata, headers=headers, timeout=10)
+            for url_candidata in urls_encontradas:
+                # 1. Filtro: Si contiene dominios basura, la saltamos
+                if any(basura in url_candidata for basura in ignorar_dominios):
+                    continue
+                
+                # 2. Filtro: Debe ser una URL razonablemente larga (evitar api calls cortas)
+                if len(url_candidata) > 25:
+                    print(f"   🎯 URL Limpia encontrada: {url_candidata}")
+                    return session.get(url_candidata, headers=headers, timeout=10)
         
         return response 
         
@@ -99,18 +99,16 @@ def resolver_redireccion_google(url_inicial):
 
 def espiar_noticia_completa(url):
     try:
-        # Usamos el nuevo resolutor con Regex
         response = resolver_redireccion_google(url)
         
         if response and response.status_code == 200:
-            print(f"   ↳ Leyendo: {response.url[:40]}...")
+            print(f"   ↳ Leyendo sitio: {response.url[:50]}...")
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Limpiamos scripts y estilos para que no ensucien
-            for script in soup(["script", "style"]):
-                script.extract()
+            # Limpiamos basura del HTML
+            for tag in soup(["script", "style", "nav", "footer", "header"]):
+                tag.extract()
                 
-            # Extraemos texto puro
             textos = soup.find_all(['p', 'h1', 'h2', 'article'])
             texto_completo = " ".join([t.get_text() for t in textos])
             return texto_completo
@@ -132,14 +130,11 @@ def revisar_incidentes(ahora):
                 f = datetime(*e.published_parsed[:6], tzinfo=pytz.utc).astimezone(ahora.tzinfo)
                 if f > limite:
                     titulo = e.title
-                    
                     if any(p in titulo.lower() for p in PALABRAS_CLAVE):
-                        print(f"👉 Posible incidente: {titulo[:30]}...")
+                        print(f"👉 Analizando: {titulo[:30]}...")
                         
-                        # 1. Detección rápida
                         tag_linea = detectar_lineas(titulo)
                         
-                        # 2. Si falla, activamos MODO ESPÍA REGEX
                         if not tag_linea:
                             print("   🕵️ Activando escaneo profundo...")
                             texto_web = espiar_noticia_completa(e.link)
