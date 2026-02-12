@@ -30,7 +30,6 @@ jobs:
       - name: Instalar librerías
         run: |
           python -m pip install --upgrade pip
-          # AGREGAMOS fake-useragent y beautifulsoup4
           pip install requests ntscraper feedparser pytz beautifulsoup4 fake-useragent
 
       - name: Ejecutar Monitor
