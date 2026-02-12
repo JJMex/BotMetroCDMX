@@ -56,9 +56,9 @@ def detectar_lineas(texto):
         return "\n⚠️ <b>AFECTACIÓN CONFIRMADA:</b> " + ", ".join(sorted(list(detectadas)))
     return ""
 
-def resolver_redireccion_google(url_inicial):
+def resolver_redireccion_google(url_inicial, fuente_nombre=""):
     """
-    Mejorado: Filtra imágenes y URLs de Google para encontrar la noticia real.
+    Versión Blindada: Filtra Analytics, busca en <noscript> y prioriza la fuente.
     """
     try:
         session = requests.Session()
@@ -68,48 +68,70 @@ def resolver_redireccion_google(url_inicial):
         
         response = session.get(url_inicial, headers=headers, timeout=10, allow_redirects=True)
         
-        # DOMINIOS BASURA A IGNORAR
-        ignorar_dominios = [
-            "googleusercontent.com", "gstatic.com", "w3.org", "schema.org", 
-            "googletagmanager.com", "google.com", "youtube.com", "blogger.com"
+        # LISTA NEGRA EXTENDIDA (Todo lo que NO es una noticia)
+        basura_domains = [
+            "google", "gstatic", "youtube", "blogger", "analytics", "doubleclick", 
+            "facebook", "twitter", "instagram", "cloudflare", "w3.org", "schema.org",
+            "googletagmanager", "g.co", "goo.gl", "pinterest", "tiktok"
         ]
         
-        if "news.google.com" in response.url:
-            print("   ⚠️ Atrapado en Google. Filtrando URLs basura...")
-            texto_html = response.text
+        if "news.google.com" in response.url or "googleusercontent" in response.url:
+            print("   ⚠️ Filtrando URL real...")
+            soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Buscamos TODAS las URLs posibles
-            urls_encontradas = re.findall(r'(https?:\/\/[^"\s<>\\]+)', texto_html)
+            # ESTRATEGIA 1: Buscar en tags <noscript> (Google suele poner el link limpio ahí)
+            noscript = soup.find('noscript')
+            if noscript:
+                links_ns = re.findall(r'(https?:\/\/[^"\s<>]+)', str(noscript))
+                for l in links_ns:
+                     if not any(b in l for b in basura_domains):
+                         print(f"   🎯 Link encontrado en NOSCRIPT: {l}")
+                         return session.get(l, headers=headers, timeout=10)
+
+            # ESTRATEGIA 2: Regex Nuclear en todo el HTML
+            urls_candidatas = re.findall(r'(https?:\/\/[^"\s<>\\]+)', response.text)
             
-            for url_candidata in urls_encontradas:
-                # 1. Filtro: Si contiene dominios basura, la saltamos
-                if any(basura in url_candidata for basura in ignorar_dominios):
-                    continue
+            # Limpiamos nombre de fuente para buscar coincidencia (ej: "TV Azteca" -> "azteca")
+            fuente_simple = fuente_nombre.lower().replace(" ", "").replace("tv", "") if fuente_nombre else "xyz"
+            
+            mejor_candidato = None
+            
+            for url in urls_candidatas:
+                # 1. Filtro de Basura
+                if any(b in url for b in basura_domains): continue
+                if len(url) < 20: continue # URLs muy cortas suelen ser assets
                 
-                # 2. Filtro: Debe ser una URL razonablemente larga (evitar api calls cortas)
-                if len(url_candidata) > 25:
-                    print(f"   🎯 URL Limpia encontrada: {url_candidata}")
-                    return session.get(url_candidata, headers=headers, timeout=10)
-        
+                # 2. Preferencia por la Fuente (Si la URL dice "azteca" y la fuente es "TV Azteca", GANAMOS)
+                if fuente_simple in url.lower() and len(fuente_simple) > 3:
+                    print(f"   🎯 MATCH DE FUENTE ({fuente_simple}): {url}")
+                    return session.get(url, headers=headers, timeout=10)
+                
+                # Guardamos el primer link válido por si no hay match de fuente
+                if not mejor_candidato: mejor_candidato = url
+
+            if mejor_candidato:
+                print(f"   🎯 Mejor candidato genérico: {mejor_candidato}")
+                return session.get(mejor_candidato, headers=headers, timeout=10)
+
         return response 
         
     except Exception as e:
-        print(f"   ❌ Error resolviendo URL: {e}")
+        print(f"   ❌ Error resolviendo: {e}")
         return None
 
-def espiar_noticia_completa(url):
+def espiar_noticia_completa(url, fuente=""):
     try:
-        response = resolver_redireccion_google(url)
+        response = resolver_redireccion_google(url, fuente)
         
         if response and response.status_code == 200:
             print(f"   ↳ Leyendo sitio: {response.url[:50]}...")
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Limpiamos basura del HTML
-            for tag in soup(["script", "style", "nav", "footer", "header"]):
+            # Limpieza profunda
+            for tag in soup(["script", "style", "nav", "footer", "header", "aside", "iframe"]):
                 tag.extract()
                 
-            textos = soup.find_all(['p', 'h1', 'h2', 'article'])
+            textos = soup.find_all(['p', 'h1', 'h2', 'h3', 'article'])
             texto_completo = " ".join([t.get_text() for t in textos])
             return texto_completo
     except Exception as e:
@@ -130,14 +152,17 @@ def revisar_incidentes(ahora):
                 f = datetime(*e.published_parsed[:6], tzinfo=pytz.utc).astimezone(ahora.tzinfo)
                 if f > limite:
                     titulo = e.title
+                    fuente = e.source.title if hasattr(e, 'source') else ""
+                    
                     if any(p in titulo.lower() for p in PALABRAS_CLAVE):
-                        print(f"👉 Analizando: {titulo[:30]}...")
+                        print(f"👉 Analizando ({fuente}): {titulo[:30]}...")
                         
                         tag_linea = detectar_lineas(titulo)
                         
                         if not tag_linea:
                             print("   🕵️ Activando escaneo profundo...")
-                            texto_web = espiar_noticia_completa(e.link)
+                            # Pasamos la fuente para ayudar a encontrar el link correcto
+                            texto_web = espiar_noticia_completa(e.link, fuente)
                             tag_linea = detectar_lineas(texto_web)
                             if tag_linea: print(f"   ✅ ¡Líneas detectadas!: {tag_linea}")
                             else: print("   ❌ No se encontraron líneas.")
