@@ -23,11 +23,21 @@ DESTINATARIOS = [id_ for id_ in [ID_GRUPO, ID_CANAL] if id_]
 
 RSS_URL = "https://news.google.com/rss/search?q=Metro+CDMX+retraso+OR+falla+OR+caos+when:1h&hl=es-419&gl=MX&ceid=MX:es-419"
 
-PALABRAS_CLAVE = ["retraso", "marcha lenta", "falla", "desalojo", "humo", "detenido", "caos", "lento", "espera", "sin servicio", "colapso", "afectaciones", "avance", "bloqueo", "estaciones", "cerradas"]
+# Diccionario de causas para dar contexto
+CAUSAS = {
+    "retraso": "Retrasos", "lento": "Marcha Lenta", "lenta": "Marcha Lenta",
+    "falla": "Falla Técnica", "avería": "Avería", "desalojo": "Desalojo de Tren",
+    "humo": "Presencia de Humo", "fuego": "Conato de Incendio", "quemado": "Olor a Quemado",
+    "zapatas": "Zapatas Pegadas", "lluvia": "Lluvia / Marcha de Seguridad", 
+    "mojado": "Lluvia", "caos": "Aglomeración Alta", "colapso": "Colapso",
+    "espera": "Tiempos de Espera Altos", "detenido": "Tren Detenido", 
+    "suicida": "Persona en Vías", "arrollado": "Accidente en Vías", "corte": "Corte de Corriente"
+}
+
+PALABRAS_CLAVE = list(CAUSAS.keys()) + ["afectaciones", "avance", "bloqueo", "cerradas", "servicio"]
 PALABRAS_SOLUCION = ["restablece", "normal", "agiliza", "solucionado", "continuo", "reanuda", "opera con normalidad"]
 IGNORAR = ["buenos días", "cubrebocas", "tarjeta", "arte", "exposición", "domingos y días festivos", "cultura", "museo"]
 
-# Firma Minimalista
 FIRMA = "\n\n— 🤖 <i>JJMex Bot</i>"
 
 MAPA_LINEAS = {
@@ -68,25 +78,55 @@ def enviar_telegram(mensaje):
 
 def analizar_sentimiento(texto):
     texto = texto.lower()
-    if any(p in texto for p in PALABRAS_SOLUCION):
-        return "✅" 
+    if any(p in texto for p in PALABRAS_SOLUCION): return "✅" 
     return "🚨"
 
-def detectar_lineas(texto):
+def analizar_detalle_lineas(texto):
+    """
+    Analiza el texto buscando líneas y asocia la CAUSA más cercana.
+    Retorna una lista de strings formateados: "⚠️ L3 (Verde): Marcha Lenta"
+    """
     texto = texto.lower()
-    detectadas = set()
-    for clave, nombre in MAPA_LINEAS.items():
-        # Patrones robustos
-        patrones = [f"línea {clave}", f"linea {clave}", f"l{clave} ", f"l-{clave}", f"la {clave} "]
-        if len(clave) < 3: patrones = [f"línea {clave}", f"linea {clave}", f"l-{clave}"]
-        
-        if any(p in texto for p in patrones):
-            detectadas.add(nombre)
+    # Dividimos por frases para no mezclar problemas de una línea con otra
+    frases = re.split(r'[.;\n]', texto) 
     
-    if detectadas:
-        lista = sorted(list(detectadas))
-        return "\n⚠️ <b>AFECTACIÓN:</b> " + ", ".join(lista)
-    return ""
+    reportes_detectados = {} # Usamos dict para evitar duplicados de líneas
+
+    for frase in frases:
+        if len(frase) < 10: continue # Ignorar frases muy cortas
+        
+        lineas_en_frase = []
+        # 1. Detectar qué líneas se mencionan en esta frase específica
+        for clave, nombre in MAPA_LINEAS.items():
+            patrones = [f"línea {clave}", f"linea {clave}", f"l{clave} ", f"l-{clave}", f"la {clave} "]
+            if len(clave) < 3: patrones = [f"línea {clave}", f"linea {clave}", f"l-{clave}"]
+            
+            if any(p in frase for p in patrones):
+                lineas_en_frase.append(nombre)
+        
+        # 2. Si hay líneas, buscar la causa en la MISMA frase
+        if lineas_en_frase:
+            causas_encontradas = []
+            for k, v in CAUSAS.items():
+                if k in frase:
+                    causas_encontradas.append(v)
+            
+            # Formatear el reporte
+            causa_str = ", ".join(list(set(causas_encontradas))) if causas_encontradas else "Posible Afectación"
+            
+            for linea in lineas_en_frase:
+                # Prioridad: Si ya detectamos algo grave, lo mantenemos. Si es "Posible", lo sobreescribimos.
+                if linea not in reportes_detectados or "Posible" in reportes_detectados[linea]:
+                    reportes_detectados[linea] = causa_str
+
+    # Convertir a lista formateada
+    resultado = []
+    if reportes_detectados:
+        items_ordenados = sorted(reportes_detectados.items())
+        for nombre, problema in items_ordenados:
+            resultado.append(f"⚠️ <b>{nombre}:</b> {problema}")
+            
+    return "\n".join(resultado) if resultado else ""
 
 def resolver_redireccion_google(url_inicial, fuente_nombre=""):
     try:
@@ -101,75 +141,51 @@ def resolver_redireccion_google(url_inicial, fuente_nombre=""):
             fuente_clean = fuente_nombre.lower().replace(" ", "").replace("tv", "").replace("noticias", "")
             if len(fuente_clean) < 3: fuente_clean = "xyz_no_match"
             
-            # Extraer todas las URLs posibles
             raw_urls = re.findall(r'(https?:\/\/[^"\s<>\\]+)', response.text)
-            
             candidato_fuente = None
             candidato_generico = None
             
             for raw_url in raw_urls:
                 url = unquote(raw_url).replace("\\u0026", "&").replace("\\", "")
-                
                 if any(b in url for b in basura): continue
                 if len(url) < 25: continue
                 if url.endswith(('.png', '.jpg', '.css', '.js', '.ico', '.woff')): continue
                 
-                # Coincidencia de fuente
                 if fuente_clean in url.lower():
-                    print(f"   🎯 MATCH EXACTO ({fuente_clean}): {url[:60]}...")
                     candidato_fuente = url
                     break
-                
                 if not candidato_generico: candidato_generico = url
             
             url_final = candidato_fuente if candidato_fuente else candidato_generico
             if url_final:
                 return session.get(url_final, headers=get_headers(), timeout=15, verify=False)
         return response 
-    except Exception as e:
-        print(f"   ❌ Error resolviendo: {e}")
-        return None
+    except Exception as e: return None
 
 def espiar_noticia_completa(url, fuente_nombre=""):
     try:
         response = resolver_redireccion_google(url, fuente_nombre)
-        
         if response and response.status_code == 200:
             print(f"   ↳ Leyendo sitio real: {response.url[:50]}...")
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # --- ESTRATEGIA 1: JSON-LD (Datos Ocultos) ---
-            # Muchos sitios (TV Azteca, Milenio) ponen el texto limpio aquí
+            # JSON-LD (Prioridad Alta)
             scripts = soup.find_all('script', type='application/ld+json')
             for script in scripts:
                 if script.string:
                     try:
                         data = json.loads(script.string)
                         if isinstance(data, list): data = data[0]
-                        if 'articleBody' in data:
-                            print("   ✅ Texto encontrado en JSON-LD (Alta Precisión)")
-                            return data['articleBody']
+                        if 'articleBody' in data: return data['articleBody']
                     except: continue
 
-            # --- ESTRATEGIA 2: HTML VISIBLE (Mejorada) ---
-            # Eliminamos ruido
+            # Scraping HTML
             for tag in soup(["script", "style", "nav", "footer", "header", "aside", "iframe", "form", "noscript", "ads"]):
                 tag.extract()
-            
-            # AHORA BUSCAMOS 'li' (Listas) y 'div' (Contenedores) además de párrafos
-            # TV Azteca suele poner las líneas afectadas en <li>
             textos = soup.find_all(['p', 'h1', 'h2', 'h3', 'li', 'article'])
-            
-            # Filtramos textos muy cortos para no leer menús
-            textos_limpios = []
-            for t in textos:
-                txt = t.get_text().strip()
-                if len(txt) > 20: textos_limpios.append(txt)
-                
+            textos_limpios = [t.get_text().strip() for t in textos if len(t.get_text().strip()) > 20]
             return " ".join(textos_limpios)
-
-    except Exception as e: 
-        print(f"   ⚠️ Error de lectura: {e}")
+    except: pass
     return ""
 
 def revisar_incidentes(ahora):
@@ -186,21 +202,40 @@ def revisar_incidentes(ahora):
                 f = datetime(*e.published_parsed[:6], tzinfo=pytz.utc).astimezone(ahora.tzinfo)
                 if f > limite:
                     titulo = e.title
+                    # IMPORTANTE: Usamos el resumen del RSS también, no solo el título
+                    resumen = e.summary if hasattr(e, 'summary') else ""
                     fuente = e.source.title if hasattr(e, 'source') else ""
                     
-                    if any(p in titulo.lower() for p in PALABRAS_CLAVE):
+                    texto_analisis = f"{titulo} {resumen}"
+                    
+                    if any(p in texto_analisis.lower() for p in PALABRAS_CLAVE):
                         print(f"👉 Analizando ({fuente}): {titulo[:30]}...")
                         
-                        tag_linea = detectar_lineas(titulo)
-                        if not tag_linea:
+                        # 1. Intentar detectar con Título + Resumen (Rápido)
+                        info_lineas = analizar_detalle_lineas(texto_analisis)
+                        
+                        # 2. Si no es suficiente, Espiar Web (Profundo)
+                        if not info_lineas:
                             print("   🕵️ Activando escaneo profundo...")
                             texto_web = espiar_noticia_completa(e.link, fuente)
-                            tag_linea = detectar_lineas(texto_web)
-                            if tag_linea: print(f"   ✅ Líneas detectadas: {tag_linea}")
-                            else: print("   ❌ No se encontraron líneas en el cuerpo.")
-                        
+                            # Analizamos TODO junto: Título + Resumen + Web
+                            info_lineas = analizar_detalle_lineas(texto_analisis + " " + texto_web)
+                            
+                        if info_lineas:
+                            print(f"   ✅ Detectado: {info_lineas}")
+                        else:
+                            print("   ❌ No se detectaron líneas específicas.")
+
                         emoji_estado = analizar_sentimiento(titulo)
-                        incidentes.append(f"{emoji_estado} <b>REPORTE:</b> {titulo}{tag_linea}\n🔗 <a href='{e.link}'>Ver Nota</a>")
+                        
+                        # Construcción del Mensaje Rico en Datos
+                        cuerpo = f"{emoji_estado} <b>REPORTE:</b> {titulo}\n"
+                        if info_lineas:
+                            cuerpo += f"\n{info_lineas}\n" # Aquí insertamos el detalle: "L3: Humo"
+                        
+                        cuerpo += f"🔗 <a href='{e.link}'>Ver Nota Completa</a>"
+                        incidentes.append(cuerpo)
+
     except Exception as e: print(f"Error RSS: {e}")
 
     # --- TWITTER (Nitter) ---
@@ -215,9 +250,13 @@ def revisar_incidentes(ahora):
                     txt = t['text'].lower()
                     if any(p in txt for p in PALABRAS_CLAVE) and not any(i in txt for i in IGNORAR):
                         if "m" in t['date'] or "1h" in t['date']:
-                             tag_linea = detectar_lineas(txt)
+                             info_lineas = analizar_detalle_lineas(txt)
                              emoji_estado = analizar_sentimiento(txt)
-                             incidentes.append(f"{emoji_estado} <b>AVISO OFICIAL:</b> {t['text']}{tag_linea}\n🔗 <a href='{t['link']}'>Ver Tweet</a>")
+                             
+                             cuerpo = f"{emoji_estado} <b>AVISO OFICIAL:</b> {t['text']}\n"
+                             if info_lineas: cuerpo += f"\n{info_lineas}\n"
+                             cuerpo += f"🔗 <a href='{t['link']}'>Ver Tweet</a>"
+                             incidentes.append(cuerpo)
                 break 
         except: continue
 
@@ -248,7 +287,6 @@ def main():
         h = ahora.strftime('%I:%M %p')
         enviar_telegram(f"📢 <b>ACTUALIZACIÓN ({h})</b>\n──────────────────\n" + "\n\n".join(un) + FIRMA)
     else:
-        # Mensaje de normalidad con Firma Minimalista
         enviar_telegram("✅ <b>Estado del Metro:</b> Sin reportes críticos en la última hora.\n<i>Sistema operando con normalidad.</i>" + FIRMA)
         print("✅ Todo normal.")
 
